@@ -34,7 +34,7 @@ A telepítő nem használ DROP DATABASE műveletet. Mivel a DDL nem egy visszag�
 
 ## Ellenőrzés, 2026-08-31
 
-`tests/installer.php`: **40 sikeres ellenőrzés**, valódi HTTP-kérésekkel és elkülönített SQL-adatbázisokkal. Lefedés:
+`tests/installer.php`: **53 sikeres ellenőrzés**, valódi HTTP-kérésekkel és elkülönített SQL-adatbázisokkal. Lefedés:
 
 - adatbázis nélküli indulás, PHP-előfeltételek, CSRF és Host ellenőrzés;
 - rendszeradatbázis és SQL/DSN-injekció elutasítása;
@@ -44,9 +44,22 @@ A telepítő nem használ DROP DATABASE műveletet. Mivel a DDL nem egy visszag�
 - meglévő, adattal teli adatbázis és konfiguráció érintetlen marad;
 - első admin validáció, hash, belépés és a második nyilvános regisztráció tiltása;
 - üres dashboard, metadata, kifejezett importfájl kérése;
+- kijelentkezés bejelentkezve, anonimként, egyórás inaktivitás és cookie-vesztés után; CSRF-védelem és újrabelépés;
 - sérült konfiguráció vagy SQL-kiesés nem nyitja újra a telepítőt;
 - projektbe helyezett privát tároló elutasítása.
 
 A valódi böngészős próbában az indítószkript konfiguráció nélkül indult, majd az adatbázis és az első admin létrehozásán keresztül az üres munkaterületig jutottunk. Az installer által létrehozott korlátozott SQL-fiókkal a backup is sikeresen lefutott. A régi helyi CMDB-konfigurációt és üzleti adatbázist a próbák nem írják.
 
 További regresszió: szintetikus CRUD/jogosultság tesztek, 13 táblacsoport XLSX roundtrip, exportjob-feldolgozás, TypeScript/build és geometriai diagramtesztek. A telepítő nem helyettesíti a teljes alkalmazás biztonsági auditját; nyilvános internetes üzem nem támogatott.
+
+## Lejárt munkamenet kezelése
+
+A közös API-kliens a védett műveletek 401-es és a CSRF-ellenőrzés 419-es válaszánál a loginra irányít. A hibás jelszó 401-es válasza helyben marad, nem okoz újratöltési ciklust. A 403-as jogosultsághiány sem jelent kijelentkezést. A login maga friss CSRF-t kér belépés előtt, így egy sokáig nyitva hagyott loginűrlap is használható.
+
+A visszatérés valódi dokumentum-újratöltés: ideiglenes `_login` query-paraméter biztosítja, hogy ne csak a hash változzon. Az indulás eltávolítja ezt a jelölőt. Az alkalmazás saját útvonala és az Apache almappája megmarad; a régi modálok, háttérlekérések és nem mentett űrlapállapot megszűnik. Módosító üzleti kérést nem játszunk újra. A login ezt a nem mentett módosításokra vonatkozó figyelmeztetéssel jelzi.
+
+A `POST /logout` továbbra is CSRF-védett, de nem igényel aktív felhasználót. Azonosítót és CSRF-t cserél, az előző sessiont megszünteti. Elavult CSRF esetén a kliens egyszer friss tokent kér és csak a kijelentkezést ismétli. Hálózati hiba esetén nem állítja, hogy a szerveroldali kijelentkezés sikerült.
+
+`pnpm test:session`: **10 kliensoldali próba**; egyszeri átirányítás párhuzamos hibáknál, teljes navigációt biztosító query, almappa megtartása, hibás jelszó, 403/422, bináris letöltés, lejárt export, CSRF-frissítés, korlátozott logout-újrapróbálás és hálózati hiba. A HTTP-próba külön, szintetikus session egyórás inaktivitását is előállítja.
+
+Böngészőben két lappal is ellenőrizve: másik lapon történő kijelentkezés után védett lista és nyitott, nem mentett űrlap mentése loginra visz; nincs beragadt kilépési párbeszéd. A már lejárt munkamenetből külön a Kijelentkezés gomb is működik, a visszajelentkezés az áttekintésre jut. Aktív sessionnel a letöltött XLSX érvényes munkafüzet; lejárt sessionnel ugyanaz a Letöltés gomb loginra irányít.

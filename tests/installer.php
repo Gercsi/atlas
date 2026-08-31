@@ -101,6 +101,35 @@ try {
     check($status === 200 && array_sum($dashboard['counts']) === 0, 'first dashboard contains no business data');
     check($request('metadata')[0] === 200, 'new admin can read metadata');
     check($request('imports/preview', 'POST', [])[0] === 422, 'empty installation requests an explicit import file');
+    check($request('logout', 'POST', null, false)[0] === 419, 'logout still requires CSRF');
+    check($request('dashboard')[0] === 200, 'rejected logout does not end authentication');
+    check($request('logout', 'POST')[0] === 200, 'authenticated logout succeeds');
+    [$status, $session] = $request('session');
+    check($status === 200 && $session['user'] === null && $csrf !== $session['csrf'], 'logout removes user and rotates CSRF');
+    $csrf = $session['csrf'];
+    check($request('logout', 'POST')[0] === 200, 'logout is idempotent for anonymous users');
+    [, $session] = $request('session');
+    $csrf = $session['csrf'];
+    check($request('login', 'POST', $admin)[0] === 200, 'same browser can log in again after logout');
+    // Expire ONLY the session created by this isolated HTTP test client.
+    // No production session/cookie/configuration is read or changed.
+    $testSessionId = substr($cookie, strlen('CMDBSESSID='));
+    if (!preg_match('/^[A-Za-z0-9,-]+$/D', $testSessionId)) throw new RuntimeException('Invalid synthetic session ID.');
+    $testSessionPath = $directory.'/sessions/sess_'.$testSessionId;
+    $expiredSession = preg_replace('/last_seen\|i:[0-9]+;/', 'last_seen|i:'.(time() - 3601).';', file_get_contents($testSessionPath), 1, $changes);
+    check($changes === 1, 'synthetic inactivity timeout prepared');
+    file_put_contents($testSessionPath, $expiredSession);
+    check($request('dashboard')[0] === 401, 'one-hour inactivity rejects protected reads');
+    check($request('logout', 'POST')[0] === 200, 'logout works after inactivity timeout');
+    $cookie = '';
+    check($request('logout', 'POST')[0] === 419, 'lost session cookie rejects old CSRF');
+    [, $session] = $request('session');
+    $csrf = $session['csrf'];
+    check($request('logout', 'POST')[0] === 200, 'fresh CSRF makes logout work after cookie loss');
+    check($request('exports/test/download')[0] === 401, 'anonymous export download remains protected');
+    [, $session] = $request('session');
+    $csrf = $session['csrf'];
+    check($request('login', 'POST', $admin)[0] === 200, 'login works after full session loss');
     file_put_contents(Config::path(), '{broken');
     check($request('session')[0] === 503 && $request('install', 'POST', $input)[0] === 503, 'malformed existing config fails closed');
     file_put_contents(Config::path(), json_encode([...$config, 'db_password' => bin2hex(random_bytes(24))]));

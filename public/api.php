@@ -51,6 +51,15 @@ try {
         http_response_code($status);
         echo json_encode($data, JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR);
     };
+    // CSRF still applies, but ending a session must not require a logged-in
+    // user (or even an available database). Repeated logout is safe.
+    if ($path === 'logout' && $method === 'POST') {
+        $_SESSION = [];
+        session_regenerate_id(true);
+        $_SESSION['csrf'] = bin2hex(random_bytes(32));
+        $reply(['success' => true]);
+        exit;
+    }
     if ($path === 'install' && $method === 'POST') {
         $reply(Installer::install($body), 201);
         // The same CSRF-protected session continues to first-admin creation.
@@ -109,11 +118,6 @@ try {
         throw new ApiError(401, 'Bejelentkezés szükséges.');
     }
     require __DIR__.'/extra-routes.php';
-    if ($path === 'logout' && $method==='POST') {
-        session_destroy();
-        $reply(['success' => true]);
-        exit;
-    }
     if ($path === 'health') {
         $reply(['status' => 'ok','database' => true,'revision' => $a->revision()]);
         exit;

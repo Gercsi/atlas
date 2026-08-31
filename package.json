@@ -6,7 +6,8 @@
   "scripts": {
     "build": "vite build",
     "check": "vue-tsc --noEmit",
-    "test:diagram": "node tests/run-diagram.mjs"
+    "test:diagram": "node tests/run-diagram.mjs",
+    "test:session": "node tests/api.test.mjs"
   },
   "dependencies": {
     "cytoscape": "^3.33.0",

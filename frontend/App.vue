@@ -1,6 +1,14 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onBeforeUnmount, watch } from "vue";
-import { api, setCsrf, labels, types, display } from "./api";
+import {
+  api,
+  apiDownload,
+  logoutSession,
+  setCsrf,
+  labels,
+  types,
+  display,
+} from "./api";
 import Lookup from "./Lookup.vue";
 import Diagram from "./Diagram.vue";
 import AppSidebar from "./AppSidebar.vue";
@@ -59,6 +67,9 @@ const user = ref<any>(null),
   installationRequired = ref(false),
   installationInfo = ref<any>(null),
   passwordConfirmation = ref(""),
+  loginNotice = ref(""),
+  loggingOut = ref(false),
+  downloading = ref(false),
   username = ref(""),
   password = ref(""),
   error = ref(""),
@@ -173,6 +184,11 @@ function notify(text: string) {
   setTimeout(() => (toast.value = ""), 5000);
 }
 async function init() {
+  const currentUrl = new URL(location.href);
+  if (currentUrl.searchParams.has("_login")) {
+    currentUrl.searchParams.delete("_login");
+    history.replaceState(null, "", currentUrl.href);
+  }
   error.value = "";
   try {
     const s = await api("session");
@@ -181,6 +197,10 @@ async function init() {
     setup.value = s.setup_required;
     installationRequired.value = !!s.installation_required;
     installationInfo.value = s.installation || null;
+    if (!user.value && location.hash === "#/login?reason=expired") {
+      loginNotice.value =
+        "A munkameneted lejárt. Jelentkezz be újra. A nem mentett módosítások nem kerültek mentésre.";
+    }
     if (user.value) await loadBase();
   } catch (e: any) {
     error.value = e.message;
@@ -192,6 +212,9 @@ async function login() {
   busy.value = true;
   error.value = "";
   try {
+    // The login form itself may have been left open beyond the session lifetime.
+    const session = await api("session");
+    setCsrf(session.csrf);
     if (setup.value) {
       if (password.value !== passwordConfirmation.value)
         throw new Error("A két jelszó nem egyezik.");
@@ -209,6 +232,7 @@ async function login() {
     user.value = s.user;
     password.value = "";
     passwordConfirmation.value = "";
+    loginNotice.value = "";
     await loadBase();
   } catch (e: any) {
     error.value = e.message;
@@ -294,9 +318,13 @@ async function loadPage() {
     adminRows.value = (await api("admin/" + page.value)).data;
 }
 async function fromHash() {
+  if (!user.value) return;
   const [route, params = ""] = location.hash.slice(2).split("?");
   const [target, id] = route.split("/");
-  if (target) {
+  if (target === "login") {
+    page.value = "dashboard";
+    history.replaceState(null, "", "#/dashboard");
+  } else if (target) {
     page.value = target;
     const search = new URLSearchParams(params);
     q.value = search.get("q") || "";
@@ -531,11 +559,50 @@ async function adminSave() {
   }
 }
 async function logout() {
-  await api("logout", "POST");
+  if (loggingOut.value) return;
+  loggingOut.value = true;
+  try {
+    await logoutSession();
+  } catch (e: any) {
+    error.value =
+      "A kijelentkezés nem sikerült. Ellenőrizd a kapcsolatot, majd próbáld újra. " +
+      e.message;
+  } finally {
+    loggingOut.value = false;
+  }
+}
+async function downloadExport() {
+  if (!job.value || downloading.value) return;
+  downloading.value = true;
+  try {
+    const current = job.value;
+    const blob = await apiDownload(`exports/${current.id}/download`);
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `CMDB-${current.id}.${current.format === "zip" ? "zip" : "xlsx"}`;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  } catch (e: any) {
+    error.value = e.message;
+  } finally {
+    downloading.value = false;
+  }
+}
+function beforeLoginRedirect() {
+  // An expiry redirect must not get stuck behind the unsaved-form unload guard.
+  dirty.value = false;
   user.value = null;
-  await init();
+  detail.value = null;
+  editing.value = false;
+  ++gen;
+  clearTimeout(debounce);
+  clearTimeout(poll);
 }
 watch(globalQuery, async (v) => {
+  if (!user.value) return;
   if (v.length < 2) {
     globalResults.value = [];
     return;
@@ -566,7 +633,7 @@ function beforeUnload(e: BeforeUnloadEvent) {
   }
 }
 watch([q, env, per, archived], () => {
-  if (!isList.value) return;
+  if (!user.value || !isList.value) return;
   clearTimeout(debounce);
   debounce = setTimeout(() => {
     p.value = 1;
@@ -580,12 +647,14 @@ onMounted(() => {
   init();
   window.addEventListener("popstate", fromHash);
   window.addEventListener("beforeunload", beforeUnload);
+  window.addEventListener("cmdb:login-redirect", beforeLoginRedirect);
 });
 onBeforeUnmount(() => {
   clearTimeout(debounce);
   clearTimeout(poll);
   window.removeEventListener("popstate", fromHash);
   window.removeEventListener("beforeunload", beforeUnload);
+  window.removeEventListener("cmdb:login-redirect", beforeLoginRedirect);
 });
 </script>
 <template>
@@ -618,6 +687,7 @@ onBeforeUnmount(() => {
     />
     <form v-else class="login-form" @submit.prevent="login">
       <div class="eyebrow">BIZTONSÁGOS HOZZÁFÉRÉS</div>
+      <p v-if="loginNotice" class="notice" role="status">{{ loginNotice }}</p>
       <ol
         v-if="setup"
         class="installation-steps"
@@ -1433,11 +1503,15 @@ onBeforeUnmount(() => {
         >
         <div class="job-status" v-if="job">
           <strong>Export: {{ job.status }}</strong
-          ><a
+          ><button
             v-if="job.status === 'completed'"
             class="button primary"
-            :href="`api.php?r=exports/${job.id}/download`"
-            ><Download :size="15" />Letöltés</a
+            :disabled="downloading"
+            @click="downloadExport"
+          >
+            <Download :size="15" />{{
+              downloading ? "Letöltés…" : "Letöltés"
+            }}</button
           ><span v-if="job.error">{{ job.error }}</span
           ><button
             v-if="job.status === 'queued'"

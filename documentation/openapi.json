@@ -2598,7 +2598,7 @@
         },
         "/logout": {
             "post": {
-                "summary": "End session",
+                "summary": "End session, including already-expired or anonymous sessions",
                 "parameters": [
                     {
                         "name": "X-CSRF-Token",
@@ -2611,28 +2611,20 @@
                 ],
                 "responses": {
                     "200": {
-                        "description": "Success"
-                    },
-                    "401": {
-                        "description": "Authentication required"
+                        "description": "Logged out; a subsequent GET /session returns user=null and a fresh CSRF token."
                     },
                     "403": {
-                        "description": "Permission denied"
+                        "description": "Nonlocal access rejected."
                     },
-                    "409": {
-                        "description": "Optimistic version or import revision conflict"
+                    "419": {
+                        "description": "Missing or stale CSRF token; request a fresh session first."
                     },
-                    "422": {
-                        "description": "Validation error",
-                        "content": {
-                            "application/json": {
-                                "schema": {
-                                    "$ref": "#/components/schemas/Error"
-                                }
-                            }
-                        }
+                    "503": {
+                        "description": "Private configuration or session storage unavailable."
                     }
-                }
+                },
+                "description": "Requires a valid CSRF token, but no authenticated user. Removes user state and rotates the session ID and CSRF token. On stale CSRF, get /session and retry logout once. Business writes must not be retried automatically.",
+                "security": []
             }
         },
         "/metadata": {

@@ -2,11 +2,29 @@ export let csrf = "";
 export function setCsrf(v: string) {
   csrf = v;
 }
-export async function api(
+let redirecting = false;
+export function redirectToLogin(reason: "expired" | "signed-out") {
+  if (redirecting) return;
+  redirecting = true;
+  csrf = "";
+  // Keep the application path (including Apache subfolders), replace only the
+  // client route. A reload also clears stale dialogs and in-flight view state.
+  const url = new URL(window.location.href);
+  url.hash = `#/login?reason=${reason}`;
+  // A hash-only navigation would keep this module and its stale state alive.
+  // init() removes the temporary query marker after the document reloads.
+  url.searchParams.set("_login", "1");
+  window.dispatchEvent(new Event("cmdb:login-redirect"));
+  window.location.replace(url.href);
+}
+type RequestOptions = { redirectOnAuthError?: boolean };
+async function request(
   path: string,
   method = "GET",
   data?: unknown,
-): Promise<any> {
+  options: RequestOptions = {},
+): Promise<Response> {
+  if (redirecting) throw new Error("Visszatérés a bejelentkezéshez…");
   const form = data instanceof FormData;
   const res = await fetch(`api.php?r=${path}`, {
     method,
@@ -16,8 +34,16 @@ export async function api(
     },
     body: data ? (form ? data : JSON.stringify(data)) : undefined,
   });
-  const result = await res.json();
   if (!res.ok) {
+    const route = path.split("&")[0];
+    if (
+      options.redirectOnAuthError !== false &&
+      (res.status === 419 || (res.status === 401 && route !== "login"))
+    )
+      redirectToLogin("expired");
+    const result = await res
+      .json()
+      .catch(() => ({ message: "A kérés nem sikerült." }));
     const error = new Error(result.message) as Error & {
       fields: any;
       status: number;
@@ -26,7 +52,32 @@ export async function api(
     error.status = res.status;
     throw error;
   }
-  return result;
+  return res;
+}
+export async function api(
+  path: string,
+  method = "GET",
+  data?: unknown,
+  options?: RequestOptions,
+): Promise<any> {
+  return (await request(path, method, data, options)).json();
+}
+export async function apiDownload(path: string): Promise<Blob> {
+  return (await request(path)).blob();
+}
+export async function logoutSession() {
+  const options = { redirectOnAuthError: false };
+  try {
+    await api("logout", "POST", undefined, options);
+  } catch (e: any) {
+    if (e.status !== 419) throw e;
+    // Session garbage collection or logout in another tab can replace the
+    // cookie. Only logout is retried; business writes are never replayed.
+    const session = await api("session", "GET", undefined, options);
+    setCsrf(session.csrf);
+    await api("logout", "POST", undefined, options);
+  }
+  redirectToLogin("signed-out");
 }
 export const labels: Record<string, string> = {
   applications: "Alkalmazások",
