@@ -1,0 +1,26 @@
+/vendor/
+/node_modules/
+/work/
+/.env
+/public/assets/
+/public/index.html
+/public/proof.html
+.env.*
+!.env.example
+config.json
+*-private/
+backups/
+exports/
+*.sql
+!documentation/schema.sql
+*.pem
+*.key
+# Local source documents and original-data verification are not distributable.
+/documentation/CMDB_fejlesztesi_specifikacio.md
+/documentation/Codex_fejlesztesi_inditoprompt.md
+/documentation/CMDB_import_ellenorzes.csv
+/documentation/TEST_REPORT.md
+/tests/source-check.php
+*.xlsx
+*.zip
+*.log
