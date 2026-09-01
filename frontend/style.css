@@ -1482,6 +1482,74 @@ tr[tabindex]:hover {
   text-align: center;
   margin-top: 22px;
 }
+.login-divider {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  color: #8aa08a;
+  margin: 18px 0 6px;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+.login-divider::before,
+.login-divider::after {
+  content: "";
+  flex: 1;
+  height: 1px;
+  background: var(--border);
+}
+.sso-button {
+  justify-content: center;
+  background: #fff;
+  border-color: #9db7aa;
+  color: #173f36;
+}
+.sso-card {
+  max-width: 980px;
+}
+.sso-card .section-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 24px;
+  margin-bottom: 20px;
+}
+.sso-card .section-heading p {
+  max-width: 680px;
+}
+.sso-grid {
+  padding: 24px 0;
+}
+.sso-grid label small {
+  color: #a4483d;
+}
+.sso-grid label small:empty {
+  display: none;
+}
+.switch-check {
+  white-space: nowrap;
+}
+.checkbox-group {
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  padding: 12px 14px;
+}
+.checkbox-group legend {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 700;
+}
+.form-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+.muted {
+  color: var(--muted);
+  font-size: 11px;
+  margin-top: 18px;
+}
 .loading {
   padding: 80px;
   text-align: center;

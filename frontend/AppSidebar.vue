@@ -17,6 +17,7 @@ import {
   PanelLeftClose,
   PanelLeftOpen,
   BookOpen,
+  KeyRound,
 } from "lucide-vue-next";
 defineProps<{
   page: string;
@@ -62,6 +63,7 @@ const sections = [
       { id: "references", label: "Szótárak", icon: Settings },
       { id: "zones", label: "Hálózati zónák", icon: Network },
       { id: "users", label: "Felhasználók", icon: Users },
+      { id: "sso", label: "SSO bejelentkezés", icon: KeyRound },
     ],
     admin: true,
   },

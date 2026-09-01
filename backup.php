@@ -28,8 +28,10 @@ try {
     if (proc_close($proc) !== 0) throw new RuntimeException('Backup failed. Check mysqldump, server availability and database permissions.');
     if (!copy(Cmdb\Config::path(), $dir.'/config.json')) throw new RuntimeException('Cannot back up private configuration.');
     @chmod($dir.'/config.json', 0600);
+    $applicationKey = Cmdb\Config::directory().'/application.key';
+    if (is_file($applicationKey)) { if (!copy($applicationKey, $dir.'/application.key')) throw new RuntimeException('Cannot back up application encryption key.'); @chmod($dir.'/application.key', 0600); }
     foreach (glob($a->config['storage'].'/*.xlsx') as $file) if (!copy($file, $dir.'/'.basename($file))) throw new RuntimeException('Cannot back up import file.');
-    file_put_contents($dir.'/manifest.json', json_encode(['created_at' => gmdate('c'), 'database' => $database, 'sha256' => hash_file('sha256', $dir.'/database.sql'), 'includes' => ['database.sql', 'config.json', 'quarantined-xlsx'], 'excludes' => ['sessions', 'temporary-exports', 'logs', 'custom-routines-and-triggers']], JSON_PRETTY_PRINT));
+    file_put_contents($dir.'/manifest.json', json_encode(['created_at' => gmdate('c'), 'database' => $database, 'sha256' => hash_file('sha256', $dir.'/database.sql'), 'includes' => ['database.sql', 'config.json', 'application.key-if-present', 'quarantined-xlsx'], 'excludes' => ['sessions', 'temporary-exports', 'logs', 'custom-routines-and-triggers']], JSON_PRETTY_PRINT));
     echo "Backup: $dir\n";
 } finally {
     if (is_file($cnf)) unlink($cnf);

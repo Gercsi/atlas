@@ -2,7 +2,7 @@
     "openapi": "3.0.3",
     "info": {
         "title": "Atlas CMDB API",
-        "version": "0.1.0",
+        "version": "0.2.0",
         "description": "Local development API. Equivalent Apache route: api.php?r=<path>. All writes require X-CSRF-Token from GET /session."
     },
     "servers": [
@@ -16,6 +16,73 @@
         }
     ],
     "paths": {
+        "/sso/login": {
+            "get": {
+                "summary": "Start configured OIDC login",
+                "security": [],
+                "responses": {
+                    "302": {
+                        "description": "Redirect to the configured identity provider"
+                    }
+                }
+            }
+        },
+        "/sso/callback": {
+            "get": {
+                "summary": "OIDC authorization-code callback",
+                "security": [],
+                "parameters": [
+                    { "name": "code", "in": "query", "schema": { "type": "string" } },
+                    { "name": "state", "in": "query", "schema": { "type": "string" } }
+                ],
+                "responses": {
+                    "302": {
+                        "description": "Redirect to dashboard or login with a one-time error"
+                    }
+                }
+            }
+        },
+        "/admin/sso": {
+            "get": {
+                "summary": "Read SSO settings without the client secret (admin)",
+                "responses": { "200": { "description": "SSO settings and exact callback URL" } }
+            },
+            "put": {
+                "summary": "Save encrypted SSO settings (admin)",
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "type": "object",
+                                "required": ["enabled", "provider_type", "display_name", "default_role"],
+                                "properties": {
+                                    "enabled": { "type": "boolean" },
+                                    "provider_type": { "type": "string", "enum": ["entra", "adfs"] },
+                                    "display_name": { "type": "string" },
+                                    "tenant_id": { "type": "string", "nullable": true },
+                                    "issuer_url": { "type": "string", "format": "uri", "nullable": true },
+                                    "client_id": { "type": "string", "nullable": true },
+                                    "client_secret": { "type": "string", "format": "password", "writeOnly": true },
+                                    "allowed_email_domains": { "type": "array", "items": { "type": "string" } },
+                                    "required_group_id": { "type": "string", "nullable": true },
+                                    "auto_provision": { "type": "boolean" },
+                                    "default_role": { "type": "string", "enum": ["viewer", "editor"] },
+                                    "default_capabilities": { "type": "array", "items": { "type": "string" } }
+                                }
+                            }
+                        }
+                    }
+                },
+                "responses": { "200": { "description": "Saved settings; secret value is never returned" } }
+            }
+        },
+        "/admin/sso/test": {
+            "post": {
+                "summary": "Validate saved OIDC discovery configuration (admin)",
+                "responses": { "200": { "description": "Validated issuer and endpoints" } }
+            }
+        },
         "/applications": {
             "get": {
                 "summary": "List applications",

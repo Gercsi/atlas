@@ -1,6 +1,25 @@
 <?php
 
 // Included by api.php after authentication. Shares the authenticated request context.
+if (($parts[0] ?? '') === 'admin' && ($parts[1] ?? '') === 'sso') {
+    if ($a->user['role'] !== 'admin') {
+        throw new \Cmdb\ApiError(403, 'Adminisztrátori jogosultság szükséges.');
+    }
+    $sso = new \Cmdb\Sso($a);
+    if ($path === 'admin/sso' && $method === 'GET') {
+        $reply($sso->adminSettings($ssoCallbackUrl));
+        exit;
+    }
+    if ($path === 'admin/sso' && $method === 'PUT') {
+        $reply($sso->save($body, $ssoCallbackUrl));
+        exit;
+    }
+    if ($path === 'admin/sso/test' && $method === 'POST') {
+        $reply($sso->testConfiguration());
+        exit;
+    }
+    throw new \Cmdb\ApiError(405, 'Nem támogatott SSO adminisztrációs művelet.');
+}
 if ($path === 'search' && $method === 'GET') {
     $query = trim($_GET['q'] ?? '');
     $rows = [];

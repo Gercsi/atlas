@@ -96,4 +96,34 @@ final class Config
             throw new ApiError(503, 'A privát tároló nem írható a PHP futtatója számára.');
         }
     }
+
+    public static function applicationKey(): string
+    {
+        self::ensurePrivateDirectory(self::directory());
+        $path = self::directory().'/application.key';
+        if (!file_exists($path)) {
+            $handle = @fopen($path, 'x+b');
+            if (is_resource($handle)) {
+                $key = random_bytes(32);
+                if (fwrite($handle, $key) !== 32 || !fflush($handle)) {
+                    fclose($handle);
+                    @unlink($path);
+                    throw new ApiError(503, 'Az alkalmazás titkosítási kulcsa nem menthető.');
+                }
+                @chmod($path, 0600);
+                fclose($handle);
+            }
+        }
+        for ($try = 0; $try < 5; $try++) {
+            clearstatcache(true, $path);
+            if (is_file($path) && !is_link($path)) {
+                $key = file_get_contents($path);
+                if (is_string($key) && strlen($key) === 32) {
+                    return $key;
+                }
+            }
+            usleep(50000);
+        }
+        throw new ApiError(503, 'Az alkalmazás titkosítási kulcsa hiányzik vagy sérült. Állítsd vissza a privát mentésből.');
+    }
 }

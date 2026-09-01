@@ -97,6 +97,14 @@ try {
     $row = $db->query('SELECT * FROM users')->fetch(PDO::FETCH_ASSOC);
     check($row['role'] === 'admin' && password_verify($admin['password'], $row['password_hash']) && $row['password_hash'] !== $admin['password'], 'admin role and hashed password persisted');
     check($request('login', 'POST', $admin)[0] === 200, 'new admin can log in');
+    [$status, $ssoAdmin] = $request('admin/sso');
+    check($status === 200 && !$ssoAdmin['enabled'] && !$ssoAdmin['client_secret_configured'] && !isset($ssoAdmin['client_secret_encrypted']), 'SSO admin starts disabled and never returns a secret');
+    $ssoSecret = 'synthetic-sso-secret-'.bin2hex(random_bytes(12));
+    [$status, $ssoSaved, $ssoRaw] = $request('admin/sso', 'PUT', ['enabled' => true,'provider_type' => 'entra','display_name' => 'Vállalati SSO','tenant_id' => '11111111-1111-4111-8111-111111111111','client_id' => '22222222-2222-4222-8222-222222222222','client_secret' => $ssoSecret,'allowed_email_domains' => ['example.com'],'required_group_id' => '','auto_provision' => false,'default_role' => 'viewer','default_capabilities' => []]);
+    check($status === 200 && $ssoSaved['enabled'] && $ssoSaved['client_secret_configured'] && !str_contains($ssoRaw, $ssoSecret), 'SSO settings API stores but never echoes the client secret');
+    [, $sessionWithSso] = $request('session');
+    $csrf = $sessionWithSso['csrf'];
+    check($sessionWithSso['sso'] === ['enabled' => true,'display_name' => 'Vállalati SSO'], 'login session exposes only public SSO button settings');
     [$status, $dashboard] = $request('dashboard');
     check($status === 200 && array_sum($dashboard['counts']) === 0, 'first dashboard contains no business data');
     check($request('metadata')[0] === 200, 'new admin can read metadata');

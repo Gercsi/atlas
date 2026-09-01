@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 require __DIR__.'/../vendor/autoload.php';
-use Cmdb\{App,ApiError,Schema,Importer,Graph,Exporter,Config,Installer};
+use Cmdb\{App,ApiError,Schema,Importer,Graph,Exporter,Config,Installer,Sso};
 
 header('Content-Type: application/json; charset=utf-8');
 header('Cache-Control: no-store');
@@ -27,19 +27,24 @@ try {
         mkdir($storage.'/sessions', 0700, true);
     }session_save_path($storage.'/sessions');
     session_name('CMDBSESSID');
-    session_set_cookie_params(['httponly' => true,'secure' => !empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off','samesite' => 'Strict','path' => '/']);
+    // OIDC returns through a cross-site top-level GET, which requires Lax.
+    // State, nonce and CSRF tokens still protect login and every mutation.
+    session_set_cookie_params(['httponly' => true,'secure' => !empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off','samesite' => 'Lax','path' => '/']);
     ini_set('session.use_strict_mode', '1');
     session_start();
-    if(isset($_SESSION['last_seen']) && time()-(int)$_SESSION['last_seen']>3600){unset($_SESSION['user_id']);session_regenerate_id(true);}
-    $_SESSION['last_seen']=time();
+    if (isset($_SESSION['last_seen']) && time() - (int)$_SESSION['last_seen'] > 3600) {
+        unset($_SESSION['user_id']);
+        session_regenerate_id(true);
+    }
+    $_SESSION['last_seen'] = time();
     $_SESSION['csrf'] ??= bin2hex(random_bytes(32));
     $method = $_SERVER['REQUEST_METHOD'];
     $path = trim($_GET['r'] ?? preg_replace('#^/api/v1/?#', '', parse_url($_SERVER['REQUEST_URI'], PHP_URL_PATH)), '/');
     $parts = explode('/', $path);
     $body = [];
     if (!in_array($method, ['GET','HEAD']) && str_contains($_SERVER['CONTENT_TYPE'] ?? '', 'application/json')) {
-        $rawBody=file_get_contents('php://input');
-        $body = $rawBody===''?[]:(json_decode($rawBody, true, 64, JSON_THROW_ON_ERROR) ?? []);
+        $rawBody = file_get_contents('php://input');
+        $body = $rawBody === '' ? [] : (json_decode($rawBody, true, 64, JSON_THROW_ON_ERROR) ?? []);
         if (!is_array($body)) {
             throw new ApiError(422, 'JSON objektum szükséges.');
         }
@@ -82,11 +87,46 @@ try {
     if (isset($_SESSION['user_id'])) {
         $a->user = $a->one('SELECT * FROM users WHERE id=? AND active=1', [$_SESSION['user_id']]);
     }
+    $scriptDirectory = str_replace('\\', '/', dirname($_SERVER['SCRIPT_NAME'] ?? '/'));
+    $scriptDirectory = $scriptDirectory === '/' ? '' : rtrim($scriptDirectory, '/');
+    $origin = ((!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') ? 'https' : 'http').'://'.$_SERVER['HTTP_HOST'];
+    $ssoCallbackUrl = $origin.$scriptDirectory.'/api.php?r=sso/callback';
+    $frontendUrl = $origin.$scriptDirectory.'/';
+    if (in_array($path, ['sso/login','sso/callback'], true) && $method === 'GET') {
+        try {
+            $sso = new Sso($a);
+            if ($path === 'sso/login') {
+                if ((int)$a->db->query('SELECT COUNT(*) FROM users')->fetchColumn() === 0) {
+                    throw new ApiError(403, 'Előbb hozd létre az első helyi adminisztrátort.');
+                }
+                $destination = $sso->begin($ssoCallbackUrl);
+                session_write_close();
+                header('Location: '.$destination, true, 302);
+                exit;
+            }
+            $u = $sso->complete($_GET, $ssoCallbackUrl);
+            session_regenerate_id(true);
+            $_SESSION['user_id'] = $u['id'];
+            unset($_SESSION['sso_error']);
+            session_write_close();
+            header('Location: '.$frontendUrl.'#/dashboard', true, 302);
+            exit;
+        } catch (ApiError $e) {
+            unset($_SESSION['sso_flow']);
+            $_SESSION['sso_error'] = $e->getMessage();
+            session_write_close();
+            header('Location: '.$frontendUrl.'#/login?reason=sso-error', true, 302);
+            exit;
+        }
+    }
     if ($path === 'session' && $method === 'GET') {
         $u = $a->user;
         if ($u) {
             unset($u['password_hash']);
-        }$reply(['user' => $u,'csrf' => $_SESSION['csrf'],'installation_required' => false,'setup_required' => (int)$a->db->query('SELECT COUNT(*) FROM users')->fetchColumn() === 0]);
+        }
+        $ssoError = $_SESSION['sso_error'] ?? null;
+        unset($_SESSION['sso_error']);
+        $reply(['user' => $u,'csrf' => $_SESSION['csrf'],'installation_required' => false,'setup_required' => (int)$a->db->query('SELECT COUNT(*) FROM users')->fetchColumn() === 0,'sso' => (new Sso($a))->publicStatus(),'sso_error' => $ssoError]);
         exit;
     }
     if ($path === 'setup' && $method === 'POST') {
@@ -94,7 +134,12 @@ try {
             throw new ApiError(403, 'Az első admin már létrejött.');
         }if (!is_string($body['password'] ?? null) || strlen($body['password']) < 12 || strlen($body['password']) > 72 || !is_string($body['username'] ?? null) || !preg_match('/^[A-Za-z0-9._-]{3,100}$/D', $body['username'])) {
             throw new ApiError(422, 'Legalább 3 karakteres felhasználónév és 12 karakteres jelszó szükséges.');
-        }$a->tx(function()use($a,$body){$a->one('SELECT value FROM revision WHERE id=1 FOR UPDATE');if((int)$a->db->query('SELECT COUNT(*) FROM users')->fetchColumn()>0)throw new ApiError(409,'Az első admin időközben létrejött.');$a->run('INSERT INTO users VALUES (?,?,?,?,?,1)', [App::id(),$body['username'],password_hash($body['password'], PASSWORD_DEFAULT),'admin','[]']);});
+        }$a->tx(function () use ($a, $body) {
+            $a->one('SELECT value FROM revision WHERE id=1 FOR UPDATE');
+            if ((int)$a->db->query('SELECT COUNT(*) FROM users')->fetchColumn() > 0) {
+                throw new ApiError(409, 'Az első admin időközben létrejött.');
+            }$a->run('INSERT INTO users VALUES (?,?,?,?,?,1)', [App::id(),$body['username'],password_hash($body['password'], PASSWORD_DEFAULT),'admin','[]']);
+        });
         $reply(['success' => true]);
         exit;
     }
@@ -227,7 +272,7 @@ try {
         }$resource = $parts[1] ?? '';
         if ($resource === 'users') {
             if ($method === 'GET') {
-                $reply(['data' => $a->all('SELECT id,username,role,capabilities,active FROM users')]);
+                $reply(['data' => $a->all('SELECT u.id,u.username,u.role,u.capabilities,u.active,EXISTS(SELECT 1 FROM user_identities i WHERE i.user_id=u.id) AS sso_identity FROM users u')]);
                 exit;
             }if (strlen($body['password'] ?? '') < 12 || !in_array($body['role'] ?? '', ['viewer','editor','admin'])) {
                 throw new ApiError(422, 'Érvényes szerep és legalább 12 karakteres jelszó szükséges.');
@@ -327,10 +372,10 @@ try {
     echo json_encode(['code' => 'CMDB_'.$e->status,'message' => $e->getMessage(),'field_errors' => $e->fields,'request_id' => $requestId], JSON_UNESCAPED_UNICODE);
 } catch (\PDOException $e) {
     http_response_code(422);
-    echo json_encode(['code' => 'CONSTRAINT','message' => 'Az adatkapcsolat vagy az egyediség sérülne. Ellenőrizd a hivatkozásokat.','request_id' => $requestId],JSON_UNESCAPED_UNICODE);
+    echo json_encode(['code' => 'CONSTRAINT','message' => 'Az adatkapcsolat vagy az egyediség sérülne. Ellenőrizd a hivatkozásokat.','request_id' => $requestId], JSON_UNESCAPED_UNICODE);
     error_log($requestId.' database error '.$e->getCode());
 } catch (\Throwable $e) {
     http_response_code(500);
-    echo json_encode(['code' => 'INTERNAL','message' => 'Belső hiba történt. Az adatok nem lettek részlegesen mentve.','request_id' => $requestId],JSON_UNESCAPED_UNICODE);
+    echo json_encode(['code' => 'INTERNAL','message' => 'Belső hiba történt. Az adatok nem lettek részlegesen mentve.','request_id' => $requestId], JSON_UNESCAPED_UNICODE);
     error_log($requestId.' '.$e->getMessage());
 }

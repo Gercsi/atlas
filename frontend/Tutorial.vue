@@ -171,6 +171,22 @@ const steps = [
     tip: "A stabil kód megválasztása előtt nézd át a már létező elemeket, hogy ne keletkezzen több azonos jelentésű bejegyzés.",
   },
   {
+    title: "SSO bejelentkezés",
+    area: "SSO bejelentkezés",
+    page: "sso",
+    tag: "ADMINISZTRÁCIÓ",
+    admin: true,
+    intro:
+      "A Microsoft Entra ID vagy AD FS OIDC-beállításait az adatbázis tárolja, a kliens titkát külön alkalmazáskulcs védi.",
+    instructions: [
+      "Adminisztráció → SSO bejelentkezés. Másold át a kijelzett callback URL-t az Entra/AD FS alkalmazás webes redirect URI-jai közé.",
+      "Add meg a tenant vagy issuer értéket, a kliensazonosítót és a kliens titkát. Szükség esetén korlátozz e-mail-tartományra és csoportazonosítóra.",
+      "Az automatikus fióklétrehozásnál csak viewer vagy editor szerepet adj. Ments, teszteld a discovery-végpontot, majd kapcsold be az SSO-t.",
+      "A helyi adminbelépést tartsd meg vészhelyzeti hozzáférésnek. A mentéshez az application.key fájl is szükséges.",
+    ],
+    tip: "Az Atlas nem kapcsol külső identitást meglévő helyi fiókhoz pusztán egyező név vagy e-mail alapján.",
+  },
+  {
     title: "Felhasználók és jogok",
     area: "Felhasználók",
     page: "users",
@@ -251,7 +267,7 @@ function reset() {
         <div class="eyebrow">TANULJ EGY MINTARENDSZEREN</div>
         <h2><BookOpen :size="24" />Ismerd meg az Atlast</h2>
         <p>
-          12 rövid lépés a kereséstől az adminisztrációig. A gyakorlóadatok
+          13 rövid lépés a kereséstől az adminisztrációig. A gyakorlóadatok
           kitaláltak és csak ebben a fülben élnek.
         </p>
       </div>
@@ -289,7 +305,9 @@ function reset() {
       </nav>
       <article class="tutorial-lesson">
         <div class="eyebrow">{{ step.tag }} · {{ index + 1 }}. LÉPÉS</div>
-        <h2 ref="lessonTitle" tabindex="-1" style="scroll-margin-top: 24px">{{ step.title }}</h2>
+        <h2 ref="lessonTitle" tabindex="-1" style="scroll-margin-top: 24px">
+          {{ step.title }}
+        </h2>
         <p class="tutorial-intro">{{ step.intro }}</p>
         <div class="tutorial-location">
           Itt találod: <strong>{{ step.area }}</strong

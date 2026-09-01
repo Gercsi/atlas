@@ -7,8 +7,9 @@ Magyar nyelvű, helyben futó CMDB alkalmazások, szerverek, adatbázisok, integ
 - CRUD, kapcsolatok, keresés, archiválás, adatminőség-jelzések és auditnapló.
 - XLSX import előnézettel, XLSX/CSV-ZIP export háttérfeldolgozással.
 - Szerepkörök és külön import/export/kapcsolattartó-hozzáférési jogosultságok.
-- 12 lépéses, szintetikus mintákat használó Oktató fül.
+- 13 lépéses, szintetikus mintákat használó Oktató fül.
 - **Első indítási telepítő:** új, üres adatbázis, saját SQL-fiók, majd az első adminisztrátor létrehozása.
+- Microsoft Entra ID és AD FS / OIDC SSO Authorization Code + PKCE folyamattal, adatbázisban tárolt, titkosított kliensbeállításokkal.
 
 A repó nem tartalmaz üzleti adatokat, előre létrehozott felhasználót vagy belépési jelszót. Ez **helyi fejlesztői kiadás**: csak localhost/loopback elérésre készült, nem internetre publikálható kész szolgáltatás. Nincs automatikus hálózati felderítés.
 
@@ -64,9 +65,17 @@ A szükséges PHP-bővítmények legyenek engedélyezve. A webszerver dokumentum
 - Meglévő konfigurációnál nem jelenik meg telepítő. Hibás konfiguráció vagy nem elérhető SQL esetén az alkalmazás hibát jelez; nem hoz létre másik adatbázist.
 - Frissítés előtt készíts mentést. Függőségtelepítés és frontend build után a `php install.php` a már beállított adatbázis nem törlő migrációját futtatja; az üres adatbázis telepítését a böngészős varázsló végzi.
 - A telepítő egyszerre csak egy helyi telepítést enged. DDL-hiba esetén a részben elkészült **új** adatbázist biztonságból megőrzi, nem törli automatikusan. Ezt SQL-admin ellenőrizze, vagy új próbához válassz másik adatbázisnevet.
-- HttpOnly / SameSite=Strict session, CSRF-védelem, belépési próbálkozáskorlát, szerveroldali jogosultság-ellenőrzés. Az első admin létrejötte után a nyilvános felhasználólétrehozás lezárul. A helyi géphez hozzáférő más felhasználó az első beállítás előtt megelőzhet: a telepítést megbízható gépen végezd el.
+- HttpOnly / SameSite=Lax session (az OIDC-visszatéréshez), külön state/nonce/PKCE- és CSRF-védelem, belépési próbálkozáskorlát, szerveroldali jogosultság-ellenőrzés. Az első admin létrejötte után a nyilvános felhasználólétrehozás lezárul. A helyi géphez hozzáférő más felhasználó az első beállítás előtt megelőzhet: a telepítést megbízható gépen végezd el.
 - Lejárt munkamenetnél a következő API-művelet automatikusan a bejelentkezésre visz, az exportletöltésnél is. A kijelentkezés lejárt sessionnel is működik. Újrabelépés után az áttekintés nyílik meg; a nem mentett űrlapok nem kerülnek automatikusan mentésre vagy újraküldésre. Régebben megnyitott lapnál a javítás betöltéséhez egyszer Ctrl+F5 szükséges.
 - A runtime SQL-fiók a saját adatbázisán migrációhoz szükséges DDL-jogokat is kap. Élesítéshez külön migrációs fiók, szűkebb runtime jogosultságok, TLS, üzemeltetési és biztonsági felülvizsgálat szükséges.
+
+### Microsoft Entra ID / AD FS SSO
+
+Frissítés után előbb futtasd a `php install.php` migrációt, majd adminisztrátorként nyisd meg az **Adminisztráció → SSO bejelentkezés** oldalt. Itt állítható a szolgáltató, tenant/issuer, kliensazonosító és titok, engedélyezett e-mail-tartomány, kötelező csoport, valamint az automatikusan létrehozott fiók alapjogosultsága. A felület megmutatja a pontos callback URL-t; ezt **Web** redirect URI-ként kell regisztrálni az identitásszolgáltatónál. Mentés után a konfiguráció külön gombbal ellenőrizhető.
+
+A kliens titka AES-256-GCM titkosítással kerül az adatbázisba, és az admin API sem adja vissza. A külön 32 bájtos `application.key` a privát konfigurációs mappában jön létre. A mentés ezt a kulcsot is tartalmazza; nélküle a visszaállított SSO-titok nem fejthető vissza. A külső identitások külön azonosítóhoz kötődnek, az alkalmazás egyező felhasználónév vagy e-mail alapján nem kapcsolja őket meglévő helyi fiókhoz.
+
+Az Entra-integráció egy tenantot fogad el, és ellenőrzi az aláírást, issuer-, audience-, tenant-, lejárati és nonce-értékeket. A kötelező csoportot a token `groups` claimjéből ellenőrzi. Csoporttúlfutásnál a belépést elutasítja; Microsoft Graph-visszakérdezést ez a helyi kiadás nem végez. Az „AD FS” lehetőség szabványos OIDC-végpontot jelent, nem közvetlen LDAP/Active Directory jelszóhitelesítést vagy Windows Integrated Authenticationt. Részletes beállítás: [documentation/SSO.md](documentation/SSO.md).
 
 Részletes telepítési állapotok és tesztek: [documentation/INSTALLATION.md](documentation/INSTALLATION.md).
 
@@ -81,7 +90,7 @@ php backup.php
 php maintenance.php
 ```
 
-A backup SQL-t, privát konfigurációt, import-XLSX-eket és hash-manifestet ment. A jelszó ideiglenes privát kliensfájlban kerül a `mysqldump` programhoz, nem parancssori argumentumban. A `CMDB_MYSQLDUMP` változóval megadható a kliens útvonala. Egyedileg hozzáadott tárolt rutinokat/triggereket a script nem ment; az Atlas sémája nem használ ilyeneket. A mentés titkokat tartalmaz, ne tedd GitHubra.
+A backup SQL-t, privát konfigurációt, az SSO-titokhoz tartozó `application.key` fájlt, import-XLSX-eket és hash-manifestet ment. A jelszó ideiglenes privát kliensfájlban kerül a `mysqldump` programhoz, nem parancssori argumentumban. A `CMDB_MYSQLDUMP` változóval megadható a kliens útvonala. Egyedileg hozzáadott tárolt rutinokat/triggereket a script nem ment; az Atlas sémája nem használ ilyeneket. A mentés titkokat tartalmaz, ne tedd GitHubra.
 
 A `maintenance.php` csak előnézetet ad; `--apply` kapcsolóval törli a lejárt exportokat. Automatikus időzítés nincs. Az import/audit 90/365 napos megőrzési konfiguráció nem jelent automatikus törlést. SQL-restore: külön üres ellenőrző adatbázisba, privát hitelesítéssel, ellenőrzés után konfigurációváltással; meglévő cél felülírása nincs automatizálva.
 
@@ -93,6 +102,7 @@ pnpm build
 pnpm test:diagram
 pnpm test:session
 php -d extension=zip -d extension=gd tests/installer.php
+php -d extension=zip -d extension=gd tests/sso.php
 php -d extension=zip -d extension=gd tests/run.php
 php -d extension=zip -d extension=gd tests/roundtrip.php
 php -d extension=zip -d extension=gd tests/jobs.php
@@ -104,6 +114,7 @@ A `/proof.html` szintetikus, adatbázist nem olvasó diagrampróba, közös alka
 
 - [Diagram: elrendezés, export, kezelhetőség és korlátok](documentation/DIAGRAM_V3.md)
 - [Útvonalvezetési motor](documentation/DIAGRAM_V2.md)
+- [Microsoft Entra ID / AD FS SSO](documentation/SSO.md)
 - [OpenAPI](documentation/openapi.json)
 - [Adatbázisséma](documentation/schema.sql)
 

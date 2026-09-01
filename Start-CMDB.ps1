@@ -1,4 +1,4 @@
-param(
+﻿param(
     [ValidateRange(1,65535)][int]$Port = 8088,
     [string]$Config = '',
     [string]$Php = 'C:\xampp\php\php.exe'

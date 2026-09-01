@@ -41,6 +41,7 @@ import {
   SlidersHorizontal,
   Clock,
   ExternalLink,
+  KeyRound,
 } from "lucide-vue-next";
 function initialSidebarState() {
   try {
@@ -66,6 +67,7 @@ const user = ref<any>(null),
   setup = ref(false),
   installationRequired = ref(false),
   installationInfo = ref<any>(null),
+  ssoPublic = ref<any>({ enabled: false, display_name: "Microsoft Entra ID" }),
   passwordConfirmation = ref(""),
   loginNotice = ref(""),
   loggingOut = ref(false),
@@ -132,6 +134,23 @@ const adminRows = ref<any[]>([]),
     active: true,
     capabilities: [],
   });
+const ssoForm = ref<any>({
+    enabled: false,
+    provider_type: "entra",
+    display_name: "Microsoft Entra ID",
+    tenant_id: "",
+    issuer_url: "",
+    client_id: "",
+    client_secret: "",
+    client_secret_configured: false,
+    allowed_email_domains_text: "",
+    required_group_id: "",
+    auto_provision: false,
+    default_role: "viewer",
+    default_capabilities: [],
+  }),
+  ssoTest = ref<any>(null),
+  ssoFields = ref<any>({});
 let debounce: ReturnType<typeof setTimeout>;
 let poll: ReturnType<typeof setTimeout>;
 let gen = 0;
@@ -156,6 +175,7 @@ const title = computed(
         users: "Felhasználók",
         references: "Szótárak",
         zones: "Hálózati zónák",
+        sso: "SSO bejelentkezés",
       } as any
     )[page.value],
 );
@@ -197,6 +217,11 @@ async function init() {
     setup.value = s.setup_required;
     installationRequired.value = !!s.installation_required;
     installationInfo.value = s.installation || null;
+    ssoPublic.value = s.sso || {
+      enabled: false,
+      display_name: "Microsoft Entra ID",
+    };
+    if (s.sso_error) error.value = s.sso_error;
     if (!user.value && location.hash === "#/login?reason=expired") {
       loginNotice.value =
         "A munkameneted lejárt. Jelentkezz be újra. A nem mentett módosítások nem kerültek mentésre.";
@@ -316,6 +341,19 @@ async function loadPage() {
   else if (page.value === "transfer") await historyLoad();
   else if (["users", "references", "zones"].includes(page.value))
     adminRows.value = (await api("admin/" + page.value)).data;
+  else if (page.value === "sso") {
+    const value = await api("admin/sso");
+    ssoForm.value = {
+      ...value,
+      client_secret: "",
+      clear_client_secret: false,
+      allowed_email_domains_text: (value.allowed_email_domains || []).join(
+        "\n",
+      ),
+    };
+    ssoTest.value = null;
+    ssoFields.value = {};
+  }
 }
 async function fromHash() {
   if (!user.value) return;
@@ -558,6 +596,51 @@ async function adminSave() {
     error.value = e.message;
   }
 }
+async function saveSso() {
+  busy.value = true;
+  error.value = "";
+  ssoFields.value = {};
+  try {
+    const saved = await api("admin/sso", "PUT", {
+      ...ssoForm.value,
+      allowed_email_domains: ssoForm.value.allowed_email_domains_text,
+    });
+    ssoForm.value = {
+      ...saved,
+      client_secret: "",
+      clear_client_secret: false,
+      allowed_email_domains_text: (saved.allowed_email_domains || []).join(
+        "\n",
+      ),
+    };
+    ssoPublic.value = {
+      enabled: saved.enabled,
+      display_name: saved.display_name,
+    };
+    notify("Az SSO-beállításokat mentettem.");
+  } catch (e: any) {
+    error.value = e.message;
+    ssoFields.value = e.fields || {};
+  } finally {
+    busy.value = false;
+  }
+}
+async function testSso() {
+  busy.value = true;
+  error.value = "";
+  ssoTest.value = null;
+  try {
+    ssoTest.value = await api("admin/sso/test", "POST");
+    notify("Az OIDC-konfiguráció elérhető és érvényes.");
+  } catch (e: any) {
+    error.value = e.message;
+  } finally {
+    busy.value = false;
+  }
+}
+function startSso() {
+  window.location.assign("api.php?r=sso/login");
+}
 async function logout() {
   if (loggingOut.value) return;
   loggingOut.value = true;
@@ -739,7 +822,13 @@ onBeforeUnmount(() => {
               ? "Admin létrehozása és belépés"
               : "Bejelentkezés"
         }}<ArrowUpRight :size="18" /></button
-      ><small>Csak a helyi gépről elérhető fejlesztői példány.</small>
+      ><template v-if="!setup && ssoPublic.enabled">
+        <div class="login-divider"><span>vagy</span></div>
+        <button type="button" class="sso-button full" @click="startSso">
+          <KeyRound :size="18" />{{ ssoPublic.display_name }}
+        </button>
+      </template>
+      <small>Csak a helyi gépről elérhető fejlesztői példány.</small>
     </form>
   </div>
   <div v-else class="shell" :class="{ 'sidebar-collapsed': sidebarCollapsed }">
@@ -1416,7 +1505,7 @@ onBeforeUnmount(() => {
               <div class="registry-row" v-for="r in adminRows">
                 <strong>{{ r.username || r.name || r.label }}</strong
                 ><span>{{ r.role || r.scope || r.category }}</span
-                ><code>{{ r.code || "" }}</code>
+                ><code>{{ r.sso_identity ? "SSO" : r.code || "" }}</code>
               </div>
             </section>
             <form class="card padded" @submit.prevent="adminSave">
@@ -1501,6 +1590,154 @@ onBeforeUnmount(() => {
             </form>
           </div></template
         >
+        <template v-if="page === 'sso'">
+          <form class="card padded sso-card" @submit.prevent="saveSso">
+            <div class="section-heading">
+              <div>
+                <h2>Microsoft Entra ID / AD FS (OIDC)</h2>
+                <p>
+                  Authorization Code + PKCE alapú bejelentkezés. A kliens titka
+                  titkosítva kerül az adatbázisba; az alkalmazáskulcs a privát
+                  konfigurációs mappában marad.
+                </p>
+              </div>
+              <label class="check switch-check"
+                ><input v-model="ssoForm.enabled" type="checkbox" />SSO
+                bekapcsolása</label
+              >
+            </div>
+            <div class="notice">
+              Az identitásszolgáltatónál pontosan ezt a webes átirányítási URI-t
+              regisztráld: <code>{{ ssoForm.callback_url }}</code>
+            </div>
+            <div class="form-grid sso-grid">
+              <label
+                >Szolgáltató<select v-model="ssoForm.provider_type">
+                  <option value="entra">Microsoft Entra ID</option>
+                  <option value="adfs">AD FS / szabványos OIDC</option></select
+                ><small>{{ ssoFields.provider_type }}</small></label
+              >
+              <label
+                >Bejelentkezési gomb felirata<input
+                  v-model="ssoForm.display_name"
+                  maxlength="100"
+                  required
+                /><small>{{ ssoFields.display_name }}</small></label
+              >
+              <label v-if="ssoForm.provider_type === 'entra'"
+                >Entra tenant ID<input
+                  v-model="ssoForm.tenant_id"
+                  placeholder="00000000-0000-0000-0000-000000000000"
+                /><small>{{ ssoFields.tenant_id }}</small></label
+              >
+              <label v-else class="span-2"
+                >OIDC issuer URL<input
+                  v-model="ssoForm.issuer_url"
+                  type="url"
+                  placeholder="https://adfs.pelda.hu/adfs"
+                /><small>{{ ssoFields.issuer_url }}</small></label
+              >
+              <label
+                >Application (client) ID<input
+                  v-model="ssoForm.client_id"
+                /><small>{{ ssoFields.client_id }}</small></label
+              >
+              <label
+                >Client secret
+                <input
+                  v-model="ssoForm.client_secret"
+                  type="password"
+                  autocomplete="new-password"
+                  placeholder="Üresen hagyva a meglévő marad"
+                />
+                <small v-if="ssoFields.client_secret">{{
+                  ssoFields.client_secret
+                }}</small>
+                <small v-else>{{
+                  ssoForm.client_secret_configured
+                    ? "Titok beállítva; az értéke nem olvasható vissza."
+                    : "Még nincs kliens titok beállítva."
+                }}</small>
+              </label>
+              <label
+                v-if="ssoForm.client_secret_configured"
+                class="check span-2"
+                ><input
+                  v-model="ssoForm.clear_client_secret"
+                  type="checkbox"
+                />A tárolt kliens titok törlése mentéskor</label
+              >
+              <label class="span-2"
+                >Engedélyezett e-mail-tartományok
+                <textarea
+                  v-model="ssoForm.allowed_email_domains_text"
+                  rows="3"
+                  placeholder="pelda.hu&#10;leanyvallalat.hu"
+                ></textarea>
+                <small>{{
+                  ssoFields.allowed_email_domains ||
+                  "Opcionális; vesszővel vagy soronként. A tenant ellenőrzése ettől függetlenül kötelező."
+                }}</small>
+              </label>
+              <label
+                >Kötelező csoport objektumazonosító<input
+                  v-model="ssoForm.required_group_id"
+                  placeholder="Opcionális group object ID"
+                /><small>{{ ssoFields.required_group_id }}</small></label
+              >
+              <label class="check"
+                ><input v-model="ssoForm.auto_provision" type="checkbox" />Új
+                SSO-felhasználók automatikus létrehozása</label
+              >
+              <label v-if="ssoForm.auto_provision"
+                >Alapértelmezett szerep<select v-model="ssoForm.default_role">
+                  <option value="viewer">viewer</option>
+                  <option value="editor">editor</option></select
+                ><small>{{ ssoFields.default_role }}</small></label
+              >
+              <fieldset
+                v-if="ssoForm.auto_provision"
+                class="span-2 checkbox-group"
+              >
+                <legend>Alapértelmezett extra jogosultságok</legend>
+                <label
+                  class="check"
+                  v-for="c in [
+                    'import_data',
+                    'export_data',
+                    'export_diagram',
+                    'view_contact_details',
+                  ]"
+                  :key="c"
+                  ><input
+                    v-model="ssoForm.default_capabilities"
+                    type="checkbox"
+                    :value="c"
+                  />{{ c }}</label
+                >
+              </fieldset>
+            </div>
+            <div v-if="error" class="notice danger" role="alert">
+              {{ error }}
+            </div>
+            <div v-if="ssoTest" class="notice success" role="status">
+              OIDC elérhető · kibocsátó: <code>{{ ssoTest.issuer }}</code>
+            </div>
+            <div class="form-actions">
+              <button class="primary" :disabled="busy">
+                Beállítások mentése
+              </button>
+              <button type="button" :disabled="busy" @click="testSso">
+                Mentett konfiguráció tesztelése
+              </button>
+            </div>
+            <p class="muted">
+              Ha csoportkorlátozást használsz és a token csoporttúlfutást jelez,
+              a belépés biztonsági okból elutasításra kerül. Graph
+              API-lekérdezést ez a változat nem végez.
+            </p>
+          </form>
+        </template>
         <div class="job-status" v-if="job">
           <strong>Export: {{ job.status }}</strong
           ><button

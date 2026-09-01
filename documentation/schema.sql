@@ -445,4 +445,38 @@ CREATE TABLE `users` (
   UNIQUE KEY `username` (`username`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+CREATE TABLE `sso_settings` (
+  `id` tinyint(4) NOT NULL,
+  `enabled` tinyint(1) NOT NULL DEFAULT 0,
+  `provider_type` varchar(20) NOT NULL DEFAULT 'entra',
+  `display_name` varchar(100) NOT NULL DEFAULT 'Microsoft Entra ID',
+  `tenant_id` varchar(100) DEFAULT NULL,
+  `issuer_url` varchar(500) DEFAULT NULL,
+  `client_id` varchar(255) DEFAULT NULL,
+  `client_secret_encrypted` text DEFAULT NULL,
+  `allowed_email_domains` longtext CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL CHECK (json_valid(`allowed_email_domains`)),
+  `required_group_id` varchar(100) DEFAULT NULL,
+  `auto_provision` tinyint(1) NOT NULL DEFAULT 0,
+  `default_role` varchar(20) NOT NULL DEFAULT 'viewer',
+  `default_capabilities` longtext CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL CHECK (json_valid(`default_capabilities`)),
+  `updated_at` datetime(6) DEFAULT NULL,
+  `updated_by` char(26) DEFAULT NULL,
+  PRIMARY KEY (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+INSERT INTO `sso_settings` (`id`,`allowed_email_domains`,`default_capabilities`) VALUES (1,'[]','[]');
+
+CREATE TABLE `user_identities` (
+  `provider_key` char(64) NOT NULL,
+  `subject` varchar(255) NOT NULL,
+  `user_id` char(26) NOT NULL,
+  `email` varchar(255) DEFAULT NULL,
+  `created_at` datetime(6) NOT NULL,
+  `last_login_at` datetime(6) NOT NULL,
+  PRIMARY KEY (`provider_key`,`subject`),
+  UNIQUE KEY `provider_user` (`provider_key`,`user_id`),
+  KEY `user_id` (`user_id`),
+  CONSTRAINT `user_identities_ibfk_1` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
 SET FOREIGN_KEY_CHECKS=1;
