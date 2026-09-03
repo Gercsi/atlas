@@ -2084,6 +2084,21 @@ tr[tabindex]:hover {
   background: #e5d8f3;
   border: 1px solid #bda5d6;
 }
+.legend-datacenter {
+  background: #e5f2ec;
+  border: 2px solid #5f9988;
+}
+.legend-external {
+  background: #f2e7fb;
+  border: 2px dashed #9b6fc0;
+}
+.legend-path {
+  background: #d07819;
+  border: 1px solid #a45a0f;
+}
+.location-path {
+  color: #71440f;
+}
 .graph-legend .muted {
   margin-left: auto;
   font-size: 8px;

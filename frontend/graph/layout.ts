@@ -79,14 +79,16 @@ interface Block {
   positions: Record<string, Point>;
   members: Set<string>;
 }
+export type LayoutStrategy = "radial" | "layered" | "compact";
 export function radialLayout(
   nodes: GraphNode[],
   edges: GraphEdge[],
   preferred = "",
   fixed: Record<string, Point> = {},
+  strategy: LayoutStrategy = "radial",
 ) {
   const t = topology(nodes, edges, preferred);
-  const compact = t.neighbors.size <= 30 && nodes.some((n) => n.parent);
+  const compact = t.neighbors.size <= 30;
   const byId = new Map(nodes.map((n) => [n.id, n]));
   const children = new Map<string, GraphNode[]>();
   for (const n of nodes) {
@@ -125,7 +127,56 @@ export function radialLayout(
       members: new Set(Object.keys(placed.positions)),
     };
   };
-  const pack = (blocks: Block[], nested = false) => {
+  const pack = (inputBlocks: Block[], nested = false) => {
+    const used = new Set<string>();
+    const exact = new Map(inputBlocks.map((b) => [b.id, b]));
+    const pairBlocks: Block[] = [];
+    for (const edge of edges.filter((e) => e.type === "database")) {
+      const application = exact.get(edge.source);
+      const database = exact.get(edge.target);
+      if (
+        !application ||
+        !database ||
+        used.has(application.id) ||
+        used.has(database.id)
+      )
+        continue;
+      used.add(application.id);
+      used.add(database.id);
+      const gap = 26;
+      const appWidth = application.rect.x2 - application.rect.x1;
+      const dbWidth = database.rect.x2 - database.rect.x1;
+      const appShift = { x: -(dbWidth + gap) / 2, y: 0 };
+      const dbShift = { x: (appWidth + gap) / 2, y: 0 };
+      const positions: Record<string, Point> = {};
+      for (const [id, p] of Object.entries(application.positions))
+        positions[id] = { x: p.x + appShift.x, y: p.y };
+      for (const [id, p] of Object.entries(database.positions))
+        positions[id] = { x: p.x + dbShift.x, y: p.y };
+      pairBlocks.push({
+        id: `db-pair-${application.id}-${database.id}`,
+        rect: bounds([
+          {
+            x1: application.rect.x1 + appShift.x,
+            y1: application.rect.y1,
+            x2: application.rect.x2 + appShift.x,
+            y2: application.rect.y2,
+          },
+          {
+            x1: database.rect.x1 + dbShift.x,
+            y1: database.rect.y1,
+            x2: database.rect.x2 + dbShift.x,
+            y2: database.rect.y2,
+          },
+        ]),
+        positions,
+        members: new Set([...application.members, ...database.members]),
+      });
+    }
+    const blocks = [
+      ...inputBlocks.filter((b) => !used.has(b.id)),
+      ...pairBlocks,
+    ];
     const owner = new Map<string, string>();
     blocks.forEach((b) => b.members.forEach((id) => owner.set(id, b.id)));
     const adj = new Map(blocks.map((b) => [b.id, new Set<string>()]));
@@ -170,7 +221,10 @@ export function radialLayout(
       });
       return { positions, rect: bounds(rects) };
     }
-    const todo = new Set(blocks.map((b) => b.id));
+    const isolated = nested ? [] : sorted.filter((b) => !adj.get(b.id)!.size);
+    const todo = new Set(
+      blocks.filter((b) => nested || adj.get(b.id)!.size).map((b) => b.id),
+    );
     const allRects: Rect[] = [];
     const positions: Record<string, Point> = {};
     for (const root of sorted) {
@@ -184,39 +238,146 @@ export function radialLayout(
             levels.set(n, levels.get(queue[at])! + 1);
           }
       const component = sorted.filter((b) => levels.has(b.id));
-      const size =
-        Math.max(
-          ...component.map((b) =>
-            Math.hypot(b.rect.x2 - b.rect.x1, b.rect.y2 - b.rect.y1),
-          ),
-        ) + 100;
       const coords = new Map<string, Point>([[root.id, { x: 0, y: 0 }]]);
-      const rings = Math.max(...levels.values());
-      let radius = 0;
-      for (let hop = 1; hop <= rings; hop++) {
-        const ring = component.filter((b) => levels.get(b.id) === hop);
-        // Keep the second hub next to the first, and each BFS ring outside the previous ring.
-        const previousRadius = radius;
-        radius = compact
-          ? previousRadius + 120
-          : Math.max(radius + size, (ring.length * size) / (2 * Math.PI));
-        ring.sort((a, b) => {
-          const angle = (b: Block) => {
-            const p = [...adj.get(b.id)!]
-              .map((id) => coords.get(id))
-              .filter(Boolean) as Point[];
-            return p.length
-              ? Math.atan2(
-                  p.reduce((s, c) => s + c.y, 0),
-                  p.reduce((s, c) => s + c.x, 0),
-                )
-              : 0;
-          };
-          return angle(a) - angle(b) || priority(a) - priority(b);
-        });
-        // Small compound graphs need space for actual rectangles, not the largest
-        // group diagonal multiplied at every nesting level.
-        if (compact) {
+      if (!nested && strategy === "layered") {
+        const rings = Math.max(...levels.values());
+        let previousX = 0;
+        let previousHalfWidth = (root.rect.x2 - root.rect.x1) / 2;
+        for (let hop = 0; hop <= rings; hop++) {
+          const column = component
+            .filter((b) => levels.get(b.id) === hop)
+            .sort((a, b) => priority(a) - priority(b));
+          const halfWidth =
+            Math.max(...column.map((b) => b.rect.x2 - b.rect.x1)) / 2;
+          const x =
+            hop === 0 ? 0 : previousX + previousHalfWidth + halfWidth + 72;
+          const height =
+            column.reduce((sum, b) => sum + b.rect.y2 - b.rect.y1, 0) +
+            Math.max(0, column.length - 1) * 48;
+          let y = -height / 2;
+          for (const block of column) {
+            const blockHeight = block.rect.y2 - block.rect.y1;
+            coords.set(block.id, { x, y: y + blockHeight / 2 });
+            y += blockHeight + 48;
+          }
+          previousX = x;
+          previousHalfWidth = halfWidth;
+        }
+      } else if (!nested && strategy === "compact") {
+        const ordered = [...component].sort(
+          (a, b) =>
+            levels.get(a.id)! - levels.get(b.id)! || priority(a) - priority(b),
+        );
+        const totalArea = ordered.reduce(
+          (sum, b) =>
+            sum + (b.rect.x2 - b.rect.x1 + 54) * (b.rect.y2 - b.rect.y1 + 46),
+          0,
+        );
+        const targetWidth = Math.max(420, Math.sqrt(totalArea * 1.55));
+        let x = 0;
+        let y = 0;
+        let rowHeight = 0;
+        for (const block of ordered) {
+          const width = block.rect.x2 - block.rect.x1;
+          const height = block.rect.y2 - block.rect.y1;
+          if (x > 0 && x + width > targetWidth) {
+            x = 0;
+            y += rowHeight + 46;
+            rowHeight = 0;
+          }
+          coords.set(block.id, {
+            x: x + width / 2 - (block.rect.x1 + block.rect.x2) / 2,
+            y: y + height / 2 - (block.rect.y1 + block.rect.y2) / 2,
+          });
+          x += width + 54;
+          rowHeight = Math.max(rowHeight, height);
+        }
+        const origin = coords.get(root.id)!;
+        for (const point of coords.values()) {
+          point.x -= origin.x;
+          point.y -= origin.y;
+        }
+      } else {
+        const rings = Math.max(...levels.values());
+        const broadStep =
+          Math.max(
+            ...component.map((b) =>
+              Math.hypot(b.rect.x2 - b.rect.x1, b.rect.y2 - b.rect.y1),
+            ),
+          ) + 100;
+        let previousOuter =
+          (compact
+            ? Math.max(root.rect.x2 - root.rect.x1, root.rect.y2 - root.rect.y1)
+            : Math.hypot(
+                root.rect.x2 - root.rect.x1,
+                root.rect.y2 - root.rect.y1,
+              )) / 2;
+        for (let hop = 1; hop <= rings; hop++) {
+          const ring = component.filter((b) => levels.get(b.id) === hop);
+          if (!compact) {
+            ring.sort((a, b) => {
+              const angle = (block: Block) => {
+                const points = [...adj.get(block.id)!]
+                  .map((id) => coords.get(id))
+                  .filter(Boolean) as Point[];
+                return points.length
+                  ? Math.atan2(
+                      points.reduce((sum, point) => sum + point.y, 0),
+                      points.reduce((sum, point) => sum + point.x, 0),
+                    )
+                  : 0;
+              };
+              return angle(a) - angle(b) || priority(a) - priority(b);
+            });
+            previousOuter = Math.max(
+              (hop === 1 ? 0 : previousOuter) + broadStep,
+              (ring.length * broadStep) / (2 * Math.PI),
+            );
+            ring.forEach((block, index) =>
+              coords.set(block.id, {
+                x:
+                  previousOuter * Math.cos((2 * Math.PI * index) / ring.length),
+                y:
+                  previousOuter * Math.sin((2 * Math.PI * index) / ring.length),
+              }),
+            );
+            continue;
+          }
+          const thickness =
+            Math.max(
+              ...ring.map((b) =>
+                compact
+                  ? Math.max(b.rect.x2 - b.rect.x1, b.rect.y2 - b.rect.y1)
+                  : Math.hypot(b.rect.x2 - b.rect.x1, b.rect.y2 - b.rect.y1),
+              ),
+            ) / 2;
+          const circumference = ring.reduce(
+            (sum, b) =>
+              sum +
+              Math.max(b.rect.x2 - b.rect.x1, b.rect.y2 - b.rect.y1) +
+              (nested ? 32 : 46),
+            0,
+          );
+          const radius = Math.max(
+            previousOuter +
+              thickness +
+              (nested ? (compact ? 28 : 38) : compact ? 30 : 58),
+            circumference / (2 * Math.PI),
+          );
+          ring.sort((a, b) => {
+            const angle = (block: Block) => {
+              const points = [...adj.get(block.id)!]
+                .map((id) => coords.get(id))
+                .filter(Boolean) as Point[];
+              return points.length
+                ? Math.atan2(
+                    points.reduce((sum, point) => sum + point.y, 0),
+                    points.reduce((sum, point) => sum + point.x, 0),
+                  )
+                : 0;
+            };
+            return angle(a) - angle(b) || priority(a) - priority(b);
+          });
           const rectAt = (b: Block) => {
             const p = coords.get(b.id)!;
             return {
@@ -228,7 +389,7 @@ export function radialLayout(
           };
           const placed = component.filter((b) => coords.has(b.id));
           ring.forEach((b, i) => {
-            let distance = previousRadius + 120;
+            let distance = radius;
             const angle = (2 * Math.PI * i) / ring.length;
             const place = () =>
               coords.set(b.id, {
@@ -238,22 +399,15 @@ export function radialLayout(
             place();
             while (
               placed.some((other) =>
-                intersects(inflate(rectAt(b), nested ? 44 : 76), rectAt(other)),
+                intersects(inflate(rectAt(b), nested ? 34 : 48), rectAt(other)),
               )
             ) {
-              distance += 12;
+              distance += 10;
               place();
             }
-            radius = Math.max(radius, distance);
             placed.push(b);
+            previousOuter = Math.max(previousOuter, distance + thickness);
           });
-        } else {
-          ring.forEach((b, i) =>
-            coords.set(b.id, {
-              x: radius * Math.cos((2 * Math.PI * i) / ring.length),
-              y: radius * Math.sin((2 * Math.PI * i) / ring.length),
-            }),
-          );
         }
       }
       const localRects = component.map((b) => {
@@ -267,7 +421,7 @@ export function radialLayout(
       });
       const bb = bounds(localRects);
       const shift = compact
-        ? compactOffset(bb, allRects, nested ? 44 : 100)
+        ? compactOffset(bb, allRects, nested ? 42 : 74)
         : componentsOffset(bb, allRects);
       component.forEach((b, i) => {
         const p = coords.get(b.id)!;
@@ -280,6 +434,26 @@ export function radialLayout(
           x2: r.x2 + shift.x,
           y2: r.y2 + shift.y,
         });
+      });
+    }
+    // Disconnected objects never determine the radius or layer spacing of the
+    // connected core. Place them only after every connected component is stable.
+    for (const block of isolated) {
+      const shift = compactOffset(
+        block.rect,
+        allRects,
+        nested ? 42 : compact ? 74 : 100,
+      );
+      for (const [id, point] of Object.entries(block.positions))
+        positions[id] = {
+          x: point.x + shift.x,
+          y: point.y + shift.y,
+        };
+      allRects.push({
+        x1: block.rect.x1 + shift.x,
+        y1: block.rect.y1 + shift.y,
+        x2: block.rect.x2 + shift.x,
+        y2: block.rect.y2 + shift.y,
       });
     }
     return { positions, rect: bounds(allRects) };

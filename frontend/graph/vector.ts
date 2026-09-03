@@ -78,6 +78,9 @@ export function vectorScene(
       const dashed =
         n.style("border-style") === "dashed" ? 'stroke-dasharray="6 3"' : "";
       let shape = `<rect x="${x}" y="${y}" width="${width}" height="${height}" rx="${n.style("shape") === "rectangle" ? 0 : 8}" fill="${fill}" fill-opacity="${opacity}" stroke="${color}" stroke-width="${border}" ${dashed}/>`;
+      if (!group && n.style("shape") === "diamond") {
+        shape = `<polygon points="${p.x},${y} ${x + width},${p.y} ${p.x},${y + height} ${x},${p.y}" fill="${fill}" fill-opacity="${opacity}" stroke="${color}" stroke-width="${border}" ${dashed}/>`;
+      }
       if (!group && n.data("entity_type") === "databases") {
         const outline = border ? shape : "";
         // Same cylinder as the on-screen SVG background, scaled to the node body.

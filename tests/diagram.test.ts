@@ -81,7 +81,10 @@ function verify(
     for (let i = 1; i < route.points.length; i++) {
       const a = route.points[i - 1],
         b = route.points[i];
-      assert.ok(a.x === b.x || a.y === b.y, "orthogonal");
+      assert.ok(
+        a.x === b.x || a.y === b.y,
+        `${e.id} is not orthogonal: ${a.x},${a.y} -> ${b.x},${b.y}`,
+      );
       for (const o of input.nodes)
         if (!allowed.has(o.id))
           assert.ok(
@@ -178,6 +181,88 @@ assert.ok(
     (e) => e.source === "second" && e.target === "hub",
   ),
 );
+const layoutNodes: GraphNode[] = [
+  { id: "app", label: "Alkalmazás", entity_type: "applications" },
+  { id: "db", label: "Adatbázis", entity_type: "databases" },
+  { id: "api", label: "API", entity_type: "applications" },
+  { id: "peer", label: "Kapcsolt rendszer", entity_type: "applications" },
+];
+const layoutEdges: GraphEdge[] = [
+  {
+    id: "db-link",
+    source: "app",
+    target: "db",
+    label: "Adatbázis",
+    type: "database",
+    count: 1,
+    entity_ids: ["db-link"],
+  },
+  {
+    id: "api-link",
+    source: "app",
+    target: "api",
+    label: "REST API",
+    type: "integration",
+    count: 1,
+    entity_ids: ["api-link"],
+  },
+  {
+    id: "peer-link",
+    source: "api",
+    target: "peer",
+    label: "REST API",
+    type: "integration",
+    count: 1,
+    entity_ids: ["peer-link"],
+  },
+];
+const strategies = ["radial", "layered", "compact"] as const;
+const strategyLayouts = strategies.map((strategy) => {
+  const layout = radialLayout(layoutNodes, layoutEdges, "", {}, strategy);
+  const app = layout.positions.app,
+    db = layout.positions.db;
+  assert.ok(
+    Math.hypot(app.x - db.x, app.y - db.y) <= 190,
+    `${strategy}: a direct application/database pair stays close`,
+  );
+  const routing = {
+    nodes: geometry(layoutNodes, layoutEdges, layout.positions),
+    edges: layoutEdges,
+  };
+  const routed = routeGraph(routing);
+  verify(routing, routed);
+  assert.equal(routed.failed.length, 0, `${strategy}: all routes exist`);
+  return layout;
+});
+assert.equal(
+  new Set(
+    strategyLayouts.map((layout) =>
+      JSON.stringify(layoutNodes.map((node) => layout.positions[node.id])),
+    ),
+  ).size,
+  3,
+  "the three automatic layout strategies produce distinct arrangements",
+);
+for (const strategy of strategies) {
+  const connected = radialLayout(layoutNodes, layoutEdges, "", {}, strategy);
+  const withIsolated = radialLayout(
+    [
+      ...layoutNodes,
+      { id: "isolated-a", label: "Kapcsolat nélkül A", entity_type: "servers" },
+      { id: "isolated-b", label: "Kapcsolat nélkül B", entity_type: "servers" },
+    ],
+    layoutEdges,
+    "",
+    {},
+    strategy,
+  );
+  for (const node of layoutNodes)
+    assert.deepEqual(
+      withIsolated.positions[node.id],
+      connected.positions[node.id],
+      `${strategy}: isolated objects do not move the connected core`,
+    );
+}
 const results = [];
 for (const kind of [
   "small-groups",
@@ -202,7 +287,7 @@ for (const kind of [
     const extent = bounds(input.nodes);
     assert.ok(
       extent.x2 - extent.x1 < 1500 && extent.y2 - extent.y1 < 1050,
-      "seven objects including an uneven server group fit a compact overview",
+      `seven objects including an uneven server group fit a compact overview (${Math.round(extent.x2 - extent.x1)}×${Math.round(extent.y2 - extent.y1)})`,
     );
     assert.equal(layout.center, "small0");
     assert.equal(layout.ranks[0].degree, 6);
@@ -230,7 +315,11 @@ for (const kind of [
     hiddenLabels: result.hiddenLabels,
     ms: result.elapsed,
   });
-  assert.equal(result.failed.length, 0, `${kind}: every route must exist`);
+  assert.equal(
+    result.failed.length,
+    0,
+    `${kind}: every route must exist (${result.failed.join(", ")})`,
+  );
 }
 const nested = fixture("crossing");
 nested.nodes

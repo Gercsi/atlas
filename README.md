@@ -2,7 +2,8 @@
 
 Magyar nyelvű, helyben futó CMDB alkalmazások, szerverek, adatbázisok, integrációk, kapcsolattartók és dokumentált hálózati kapcsolatok nyilvántartására. PHP/PDO backend, MariaDB/MySQL adatbázis, Vue 3 + TypeScript felület.
 
-- Kapcsolati térkép szűréssel, kapcsolatszám szerinti rangsorral, sugárirányú elrendezéssel, akadálykerülő vonalakkal és kézzel rögzíthető pozíciókkal.
+- Kapcsolati térkép szűréssel, kapcsolatszám szerinti rangsorral, három körbejárható automatikus elrendezéssel, akadálykerülő vonalakkal és kézzel rögzíthető pozíciókkal.
+- Kattintható szerverkeretek, valamint adatközpont/felhő/internet topológia dokumentált, több lépéses hálózati útvonal kiemelésével.
 - PNG, valamint nagyítható **vektoros SVG és PDF** diagramexport; teljes képernyő és összecsukható navigáció.
 - CRUD, kapcsolatok, keresés, archiválás, adatminőség-jelzések és auditnapló.
 - XLSX import előnézettel, XLSX/CSV-ZIP export háttérfeldolgozással.
@@ -112,7 +113,7 @@ A PHP-próbák új, véletlen nevű szintetikus adatbázisokat és privát ideig
 
 A `/proof.html` szintetikus, adatbázist nem olvasó diagrampróba, közös alkalmazáskomponensekkel. Nem kerül meg bejelentkezést és nem használ üzleti adatot. A `vendor`, `node_modules` és buildelt `public/assets` fájlok nincsenek a repóban, a fenti telepítés hozza létre őket.
 
-- [Diagram: elrendezés, export, kezelhetőség és korlátok](documentation/DIAGRAM_V3.md)
+- [Diagram: elrendezés, adatközpontok, export és korlátok](documentation/DIAGRAM_V4.md)
 - [Útvonalvezetési motor](documentation/DIAGRAM_V2.md)
 - [Microsoft Entra ID / AD FS SSO](documentation/SSO.md)
 - [OpenAPI](documentation/openapi.json)

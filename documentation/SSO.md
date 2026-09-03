@@ -41,4 +41,20 @@ A teljes SSO-beállítás az adatbázis `sso_settings` táblájában van. A klie
 
 Az SSO-folyamat tíz percig érvényes state-, nonce- és PKCE-adatot tart a szerveroldali sessionben. Aláírás-, issuer-, audience-, tenant-, nonce- vagy időhiba esetén a callback a loginoldalra tér vissza általános hibaüzenettel. Az identitásszolgáltató nyers hibaleírása és a kliens titka nem kerül a böngésző válaszába vagy az auditdiffbe.
 
+## Mit ellenőriz az automatizált SSO-próba?
+
+A `php tests/sso.php` jelenleg 21 ellenőrzést fut külön, szintetikus adatbázison. Helyben generált RSA-kulccsal és JWKS-dokumentummal ellenőrzi a jó token elfogadását, valamint a hibás aláírási/érvényességi adatok, audience, nonce, tenant, e-mail-tartomány, csoport és csoporttúlfutás elutasítását. Ellenőrzi a titok AES-GCM tárolását, a stabil külső identitás-hozzárendelést és azt is, hogy azonos e-mail vagy felhasználónév nem vesz át helyi fiókot.
+
+A próba egy teljes, determinisztikus OIDC-szolgáltatót is szimulál. Végigfut a discovery ellenőrzésen, az authorization URL-en, a state/nonce és S256 PKCE létrehozásán, az egyszer használatos kód kliensazonosítóval, titokkal és verifierrel történő cseréjén, a JWKS letöltésén, az RS256 token ellenőrzésén és az engedélyezett felhasználó létrehozásán. A state újrajátszását elutasítja.
+
+Ez erős automatizált bizonyíték az Atlas saját OIDC-folyamatára, de nem helyettesít valódi Microsoft tenanttal vagy a cél AD FS rendszerrel végzett átvételi próbát. A tesztkörnyezetben nincs valódi Entra/AD FS, ezért nem állítjuk, hogy egy ismeretlen vállalati proxy-, tanúsítvány-, Conditional Access- vagy claimbeállítás elsőre biztosan megfelelő lesz.
+
+Élesítés előtt egy tesztfelhasználóval végezd el az alábbi rövid átvételt:
+
+1. a felületi **Mentett konfiguráció tesztelése** sikeresen olvassa a cél discovery dokumentumát;
+2. a callback URL pontosan egyezik az identitásszolgáltató Web redirect URI-jával;
+3. a login gomb után a szolgáltatóra, majd vissza az Atlasba kerül a böngésző;
+4. az e-mail-, csoport- és szerepkörkorlátozás jó és szándékosan tiltott felhasználóval is a várt eredményt adja;
+5. a helyi admin vészbelépés és az SSO kijelentkezés után is használható.
+
 Az implementáció alapjai: [Microsoft authorization code + PKCE](https://learn.microsoft.com/en-us/entra/identity-platform/v2-oauth2-auth-code-flow), [hozzáférési és azonosító tokenek ellenőrzése](https://learn.microsoft.com/en-us/entra/identity-platform/access-tokens), [redirect URI szabályok](https://learn.microsoft.com/en-us/entra/identity-platform/reply-url), [alkalmazáshitelesítő adatok](https://learn.microsoft.com/en-us/entra/identity-platform/how-to-add-credentials), [csoporttúlfutás](https://learn.microsoft.com/en-us/troubleshoot/entra/entra-id/app-integration/get-signed-in-users-groups-in-access-token).

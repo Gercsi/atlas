@@ -48,6 +48,8 @@ export interface Route {
   dash: string;
   opacity: number;
   crossings: number;
+  width?: number;
+  directed?: boolean;
 }
 export interface RoutingInput {
   nodes: Obstacle[];

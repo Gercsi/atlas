@@ -114,7 +114,15 @@ function portCandidates(r: Obstacle): Port[] {
 }
 function simplify(points: Point[]) {
   const p: Point[] = [];
-  for (const point of points) {
+  for (const raw of points) {
+    const point = { x: round(raw.x), y: round(raw.y) };
+    if (p.length) {
+      const previous = p[p.length - 1];
+      // Layout calculations can leave a hundredth-pixel drift at a port. Snap
+      // that drift so exported and on-screen routes remain truly orthogonal.
+      if (Math.abs(previous.x - point.x) <= EPS * 2) point.x = previous.x;
+      else if (Math.abs(previous.y - point.y) <= EPS * 2) point.y = previous.y;
+    }
     if (p.length && distance(p[p.length - 1], point) < EPS) continue;
     while (p.length > 1) {
       const a = p[p.length - 2],
@@ -358,8 +366,9 @@ export function routeGraph(
       (ports.get(dst.id) || []).filter((p) => p !== s && p !== t),
     );
     const points = simplify([s.at, ...best, t.at]);
-    const color =
-      edge.action === "deny"
+    const color = edge.on_path
+      ? "#d07819"
+      : edge.action === "deny"
         ? "#bc444e"
         : edge.action === "unknown"
           ? "#a77b1c"
@@ -372,6 +381,8 @@ export function routeGraph(
       path: "",
       arrow: "",
       color,
+      width: edge.on_path ? 4 : 1.8,
+      directed: edge.type !== "boundary",
       dash:
         edge.action === "unknown"
           ? "2 5"
@@ -710,12 +721,14 @@ export function decorateRoutes(routes: Route[]) {
       line(at, len);
     });
     r.path = d.join("");
-    const tip = r.points.at(-1)!,
-      pre = r.points.at(-2)!,
-      len = distance(tip, pre),
-      dx = (tip.x - pre.x) / len,
-      dy = (tip.y - pre.y) / len;
-    r.arrow = `${tip.x},${tip.y} ${round(tip.x - dx * 10 + dy * 4)},${round(tip.y - dy * 10 - dx * 4)} ${round(tip.x - dx * 10 - dy * 4)},${round(tip.y - dy * 10 + dx * 4)}`;
+    if (r.directed !== false) {
+      const tip = r.points.at(-1)!,
+        pre = r.points.at(-2)!,
+        len = distance(tip, pre),
+        dx = (tip.x - pre.x) / len,
+        dy = (tip.y - pre.y) / len;
+      r.arrow = `${tip.x},${tip.y} ${round(tip.x - dx * 10 + dy * 4)},${round(tip.y - dy * 10 - dx * 4)} ${round(tip.x - dx * 10 - dy * 4)},${round(tip.y - dy * 10 + dx * 4)}`;
+    }
   });
   return total;
 }

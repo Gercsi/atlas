@@ -96,4 +96,75 @@ $sso->save([...$saved,'client_secret' => '','allowed_email_domains' => ['example
 $check(SecretStore::decrypt($app->one('SELECT client_secret_encrypted FROM sso_settings WHERE id=1')['client_secret_encrypted'], 'atlas-sso-client-secret-v1') === 'test-only-client-secret', 'blank admin secret preserves existing encrypted value');
 $rejects(403, fn () => $sso->resolveUser([...$verified,'oid' => 'object-id-5','email' => 'new@example.com','preferred_username' => 'new@example.com']));
 
+$mockIssuer = 'https://mock-idp.example.test/adfs';
+$mockMetadata = [
+    'issuer' => $mockIssuer,
+    'authorization_endpoint' => $mockIssuer.'/authorize',
+    'token_endpoint' => $mockIssuer.'/token',
+    'jwks_uri' => $mockIssuer.'/keys',
+    'token_endpoint_auth_methods_supported' => ['client_secret_post'],
+];
+$mockToken = '';
+$tokenForm = null;
+$mockSso = new Sso($app, function (string $url, ?array $form) use ($mockIssuer, $mockMetadata, $jwks, &$mockToken, &$tokenForm): array {
+    if ($url === $mockIssuer.'/.well-known/openid-configuration') {
+        return $mockMetadata;
+    }
+    if ($url === $mockIssuer.'/token') {
+        $tokenForm = $form;
+        return ['id_token' => $mockToken,'token_type' => 'Bearer'];
+    }
+    if ($url === $mockIssuer.'/keys') {
+        return $jwks;
+    }
+    throw new RuntimeException('Unexpected mock OIDC URL: '.$url);
+});
+$mockSso->save([
+    'enabled' => true,'provider_type' => 'adfs','display_name' => 'Teszt OIDC belépés','issuer_url' => $mockIssuer,
+    'tenant_id' => '','client_id' => 'mock-client','client_secret' => 'mock-secret',
+    'allowed_email_domains' => ['example.com'],'required_group_id' => 'mock-users','auto_provision' => true,
+    'default_role' => 'editor','default_capabilities' => ['export_diagram'],
+], 'http://127.0.0.1:9999/api.php?r=sso/callback');
+$configuration = $mockSso->testConfiguration();
+$check($configuration['success'] && $configuration['issuer'] === $mockIssuer, 'mock provider discovery and endpoint validation');
+$_SESSION = [];
+$callback = 'http://127.0.0.1:9999/api.php?r=sso/callback';
+$authorizationUrl = $mockSso->begin($callback);
+parse_str((string)parse_url($authorizationUrl, PHP_URL_QUERY), $authorizationQuery);
+$flow = $_SESSION['sso_flow'];
+$expectedChallenge = rtrim(strtr(base64_encode(hash('sha256', $flow['verifier'], true)), '+/', '-_'), '=');
+$check(
+    str_starts_with($authorizationUrl, $mockMetadata['authorization_endpoint'].'?')
+    && $authorizationQuery['response_type'] === 'code'
+    && $authorizationQuery['redirect_uri'] === $callback
+    && $authorizationQuery['state'] === $flow['state']
+    && $authorizationQuery['nonce'] === $flow['nonce']
+    && $authorizationQuery['code_challenge_method'] === 'S256'
+    && $authorizationQuery['code_challenge'] === $expectedChallenge,
+    'authorization redirect carries state, nonce and PKCE'
+);
+$mockClaims = [
+    'iss' => $mockIssuer,'aud' => 'mock-client','sub' => 'mock-subject','oid' => 'mock-object-id',
+    'nonce' => $flow['nonce'],'iat' => time(),'nbf' => time() - 1,'exp' => time() + 300,
+    'preferred_username' => 'mock.user@example.com','email' => 'mock.user@example.com','groups' => ['mock-users'],
+];
+$mockToken = JWT::encode($mockClaims, $privateKey, 'RS256', 'test-key');
+$mockUser = $mockSso->complete(['state' => $flow['state'],'code' => 'one-time-code'], $callback);
+$check(
+    $tokenForm['grant_type'] === 'authorization_code'
+    && $tokenForm['client_id'] === 'mock-client'
+    && $tokenForm['client_secret'] === 'mock-secret'
+    && $tokenForm['code'] === 'one-time-code'
+    && $tokenForm['redirect_uri'] === $callback
+    && $tokenForm['code_verifier'] === $flow['verifier'],
+    'authorization code is exchanged with verifier and configured secret'
+);
+$check(
+    $mockUser['role'] === 'editor'
+    && $mockUser['username'] === 'mock.user'
+    && !isset($_SESSION['sso_flow']),
+    'full mock OIDC flow verifies token and provisions the session user'
+);
+$rejects(401, fn () => $mockSso->complete(['state' => $flow['state'],'code' => 'replay'], $callback));
+
 echo "$passed SSO checks passed. Synthetic database retained for inspection.\n";

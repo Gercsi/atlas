@@ -52,7 +52,7 @@ const steps = [
       "A szerver keresőmezőjében keress név vagy azonosító alapján, és válassz létező szervert. A szabadon begépelt név önmagában nem hoz létre kapcsolatot.",
       "Mentés után nyisd meg az adatlap Kapcsolatok fülét, és ellenőrizd a hozzárendelést.",
     ],
-    tip: "A mintaalkalmazás DEMO-SRV-01-en fut. A szerverkeretes diagram ezt a kapcsolatot csoportosítással mutatja.",
+    tip: "A mintaalkalmazás DEMO-SRV-01-en fut. Szerverkeretes nézetben maga a keret a kattintható szerverobjektum; nem jelenik meg benne egy második szerverdoboz.",
   },
   {
     title: "Adatbázis dokumentálása",
@@ -105,12 +105,14 @@ const steps = [
       "A szűrés, a központ és az elrendezés együtt ad olvasható kapcsolati térképet.",
     instructions: [
       "Válassz nézetet és környezetet, szükség esetén kiinduló szervereket és szomszédsági lépéseket, majd kattints a Nézet frissítése gombra.",
-      "A legtöbb egyedi szomszéddal rendelkező látható rendszer a központ. Az Automatikus elrendezés újrarendez; az egyszerű kijelölés nem.",
+      "A legtöbb egyedi szomszéddal rendelkező látható rendszer a központ. A Nézet frissítése és az Automatikus elrendezés felváltva kompakt pókháló, kapcsolati rétegek és tömör térkép szerint rendez; az egyszerű kijelölés nem.",
       "Húzással rögzíthetsz pozíciót. A kijelölt objektum paneljén külön rögzítés/feloldás és Középpontba helyezés művelet is van.",
       "A Teljes képernyő a szűrőket is megtartja. A Teljes ábra illesztése csak a kamerát igazítja; a +/− gombok nagyítanak. Kilépés: Esc vagy a teljesképernyő-gomb.",
       "Az élre kattintva nyílik a kapcsolat részlete. A darabszám összevont kapcsolatot jelöl; a vonal megszakítása kereszteződést, nem új kapcsolatot.",
+      "Az Adatközpontok és külső hosztolás nézet a szerver Adatközpont és Elhelyezés típusa mezőit használja. A cloud/hosted érték és az external/partner hálózati zóna külön külső keretet kap.",
+      "Két hely kiválasztása után a frissítés narancssárgával kiemeli a dokumentált, akár több köztes helyen átvezető hálózati útvonalat. Ez nyilvántartási út, nem élő hálózati teszt.",
     ],
-    tip: "Nagyítható mentéshez SVG vagy PDF kell. A PNG képpontos. A mentett nézet szűrőket és pozíciókat őriz, nem külön adatbázis-másolatot.",
+    tip: "A közvetlen alkalmazás–adatbázis párok azonos szerverkereten belül közel maradnak, a kapcsolat nélküli elemek pedig csak a kapcsolt mag után kerülnek ki. Nagyítható mentéshez SVG vagy PDF kell. A mentett nézet szűrőket, pozíciókat és elrendezési módot őriz, nem külön adatbázis-másolatot.",
   },
   {
     title: "Import és export",
@@ -153,6 +155,7 @@ const steps = [
       "Adminisztráció → Hálózati zónák. Az Új elem résznél add meg a zóna nevét.",
       "Válassz besorolást: internal, dmz, partner, external vagy unknown. Szükség esetén válassz szülőzónát és írj megjegyzést.",
       "Mentés után a megfelelő rekordoknál használd az új zónát. Ne keverd össze a zóna besorolását a PROD/TEST környezettel.",
+      "Internetet vagy külső hálózatot explicit external zónával jelölj. Egy IP-címből vagy az on-premise hosztolásból az Atlas biztonsági okból nem következtet automatikusan hálózati határra.",
     ],
     tip: "Példa: DEMO Belső hálózat, besorolás: internal. Az oktató nem hoz létre valódi zónát.",
   },

@@ -14,8 +14,12 @@ final class Sso
     private const MAX_RESPONSE = 1048576;
     private const CAPABILITIES = ['import_data','export_data','export_diagram','view_contact_details'];
 
-    public function __construct(private App $app)
+    /** @var null|callable(string,?array):array Test seam for a deterministic OIDC provider. */
+    private $http;
+
+    public function __construct(private App $app, ?callable $http = null)
     {
+        $this->http = $http;
     }
 
     public function publicStatus(): array
@@ -172,14 +176,14 @@ final class Sso
         $this->assertComplete($settings, true);
         $metadata = $this->discovery($settings);
         $secret = SecretStore::decrypt($settings['client_secret_encrypted'], self::SECRET_CONTEXT);
-        $tokens = self::requestJson($metadata['token_endpoint'], [
+        $tokens = $this->fetchJson($metadata['token_endpoint'], [
             'grant_type' => 'authorization_code','client_id' => $settings['client_id'],'client_secret' => $secret,
             'code' => $query['code'],'redirect_uri' => $callbackUrl,'code_verifier' => $flow['verifier'],
         ]);
         if (!is_string($tokens['id_token'] ?? null) || $tokens['id_token'] === '') {
             throw new ApiError(502, 'Az identitásszolgáltató nem adott azonosító tokent.');
         }
-        $jwks = self::requestJson($metadata['jwks_uri']);
+        $jwks = $this->fetchJson($metadata['jwks_uri']);
         $claims = self::verifyIdToken($tokens['id_token'], $metadata, $jwks, $settings, $flow['nonce']);
         return $this->resolveUser($claims, $settings);
     }
@@ -361,7 +365,7 @@ final class Sso
     private function discovery(array $settings): array
     {
         $expected = self::issuer($settings);
-        $metadata = self::requestJson($expected.'/.well-known/openid-configuration');
+        $metadata = $this->fetchJson($expected.'/.well-known/openid-configuration');
         foreach (['issuer','authorization_endpoint','token_endpoint','jwks_uri'] as $field) {
             if (!is_string($metadata[$field] ?? null)) {
                 throw new ApiError(502, 'Az OIDC felderítési dokumentum hiányos.');
@@ -417,6 +421,18 @@ final class Sso
             throw new ApiError(502, 'Az identitásszolgáltató válasza hibás.');
         }
         return $decoded;
+    }
+
+    private function fetchJson(string $url, ?array $form = null): array
+    {
+        if ($this->http !== null) {
+            $result = ($this->http)($url, $form);
+            if (!is_array($result)) {
+                throw new ApiError(502, 'Az identitásszolgáltató válasza hibás.');
+            }
+            return $result;
+        }
+        return self::requestJson($url, $form);
     }
 
     private static function issuer(array $settings): string

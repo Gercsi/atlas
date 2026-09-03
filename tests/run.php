@@ -42,9 +42,10 @@ $expect = function (int $status, callable $fn) use ($assert) {
         $assert($e->status === $status, 'Wrong status '.$e->status);
     }
 };
-$s1 = $a->save('servers', ['name' => 'QA platform 01','environment' => 'PROD','cpu' => 4,'ram_gib' => 16]);
-$s2 = $a->save('servers', ['name' => 'QA data 02','environment' => 'PROD']);
-$s3 = $a->save('servers', ['name' => 'QA integration 03','environment' => 'TEST']);
+$s1 = $a->save('servers', ['name' => 'QA platform 01','environment' => 'PROD','hosting_type' => 'on_premise','datacenter' => 'DC-A','cpu' => 4,'ram_gib' => 16]);
+$s2 = $a->save('servers', ['name' => 'QA data 02','environment' => 'PROD','hosting_type' => 'on_premise','datacenter' => 'DC-B']);
+$s3 = $a->save('servers', ['name' => 'QA integration 03','environment' => 'TEST','hosting_type' => 'cloud']);
+$s4 = $a->save('servers', ['name' => 'QA transit 04','environment' => 'PROD','hosting_type' => 'on_premise','datacenter' => 'DC-C']);
 $app = $a->save('applications', ['name' => 'Műhely — Áttekintés','environment' => 'PROD','server_id' => $s1['id'],'notes' => "=HYPERLINK(\"https://invalid.example\")\nMásodik sor"]);
 $app2 = $a->save('applications', ['name' => 'Raktár','environment' => 'PROD','server_id' => $s2['id']]);
 $app3 = $a->save('applications', ['name' => 'Teszt portál','environment' => 'TEST','server_id' => $s3['id']]);
@@ -52,6 +53,7 @@ $db = $a->save('databases', ['name' => 'Üzemi adatok','engine' => 'PostgreSQL',
 $contact = $a->save('contacts', ['name' => 'Szintetikus Kapcsolattartó','email' => 'qa@example.invalid','phone' => '+36 00 000 0000','contact_type' => 'person']);
 $int = $a->save('integrations', ['source_application_id' => $app['id'],'target_application_id' => $app2['id'],'interface_type' => 'REST','protocol' => 'HTTPS']);
 $net = $a->save('network_connections', ['name' => 'Dokumentált QA szabály','connection_type' => 'firewall_rule','action' => 'allow','status' => 'active','transport_protocol' => 'tcp','source_ports_mode' => 'any','destination_ports_mode' => 'specified','endpoints' => [['side' => 'source','endpoint_kind' => 'server','server_id' => $s1['id']],['side' => 'target','endpoint_kind' => 'server','server_id' => $s2['id']]],'services' => [['side' => 'destination','port_from' => 443,'port_to' => 443]]]);
+$a->save('network_connections', ['name' => 'Dokumentált tranzit','connection_type' => 'direct_flow','action' => 'allow','status' => 'active','transport_protocol' => 'tcp','source_ports_mode' => 'any','destination_ports_mode' => 'specified','endpoints' => [['side' => 'source','endpoint_kind' => 'server','server_id' => $s2['id']],['side' => 'target','endpoint_kind' => 'server','server_id' => $s4['id']]],'services' => [['side' => 'destination','port_from' => 443,'port_to' => 443]]]);
 $test('A01 six registries persist and read', function () use ($a, $assert) {
     foreach (Schema::TYPES as $t) {
         $assert($a->listing($t, [])['meta']['total'] > 0, $t);
@@ -69,6 +71,20 @@ $test('A04 independent application and DB hosts', function () use ($a, $app, $db
     $g = (new Graph($a))->query([]);
     $n = array_column($g['nodes'], null, 'id');
     $assert($n[$db['id']]['parent'] === 'group-'.$s2['id']);
+    $assert(!isset($n[$s1['id']]), 'A szerver nem jelenhet meg külön a saját keretében.');
+    $assert($n['group-'.$s1['id']]['record_type'] === 'servers', 'A szerverkeretnek kell megnyitnia a szerveradatlapot.');
+});
+$test('A05 datacenter, cloud and multi-hop location route', function () use ($a, $s1, $s3, $s4, $assert) {
+    $g = (new Graph($a))->query(['view' => 'datacenters','path_from' => 'dc:dc-a','path_to' => 'dc:dc-c']);
+    $nodes = array_column($g['nodes'], null, 'id');
+    $locations = array_column($g['meta']['locations'], null, 'key');
+    $assert(isset($locations['dc:dc-a'],$locations['dc:dc-b'],$locations['dc:dc-c']), 'Az adatközpontok hiányoznak.');
+    $assert($locations['cloud']['scope'] === 'external', 'A felhőnek külső helyként kell megjelennie.');
+    $assert($nodes['group-'.$s1['id']]['parent'] === $locations['dc:dc-a']['id']);
+    $assert(isset($nodes['group-'.$s4['id']]), 'Az alkalmazás nélküli szerverkeret sem tűnhet el.');
+    $assert($nodes['group-'.$s3['id']]['parent'] === $locations['cloud']['id']);
+    $assert($g['meta']['location_path'] === ['Adatközpont · DC-A','Adatközpont · DC-B','Adatközpont · DC-C'], 'A kétlépéses adatközponti útvonal hibás.');
+    $assert(count(array_filter($g['edges'], fn ($edge) => !empty($edge['on_path']))) === 2, 'A több lépéses útvonal élei nincsenek kiemelve.');
 });
 $test('A06 optimistic edit 409 and no lost update', function () use ($a, $app, $expect, $assert) {
     $a->save('applications', ['name' => 'Műhely — javított','lock_version' => 1], $app['id']);

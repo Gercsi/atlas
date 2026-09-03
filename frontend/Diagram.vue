@@ -16,7 +16,12 @@ import {
 } from "./graph/vector";
 import { api, labels } from "./api";
 import Lookup from "./Lookup.vue";
-import { radialLayout, topology, nodeSize } from "./graph/layout";
+import {
+  radialLayout,
+  topology,
+  nodeSize,
+  type LayoutStrategy,
+} from "./graph/layout";
 import {
   aggregateEdges,
   inflate,
@@ -126,6 +131,8 @@ const config = ref<any>({
   databases: true,
   integrations: true,
   include_unknown: true,
+  path_from: "",
+  path_to: "",
 });
 const chosen = ref<any>(null),
   meta = ref<any>({}),
@@ -213,6 +220,19 @@ let routeWorker: Worker | undefined,
 let visibleNodes: GraphNode[] = [],
   visibleEdges: GraphEdge[] = [];
 const layoutRevision = ref(0);
+const layoutModes: { id: LayoutStrategy; label: string }[] = [
+  { id: "radial", label: "Kompakt pókháló" },
+  { id: "layered", label: "Kapcsolati rétegek" },
+  { id: "compact", label: "Tömör kapcsolati térkép" },
+];
+const layoutModeIndex = ref(0);
+const activeLayout = computed(() => layoutModes[layoutModeIndex.value]);
+const nextLayout = computed(
+  () => layoutModes[(layoutModeIndex.value + 1) % layoutModes.length],
+);
+function cycleLayout() {
+  layoutModeIndex.value = (layoutModeIndex.value + 1) % layoutModes.length;
+}
 const fixtureKind = ref("ranking");
 function syncRoutes() {
   if (cy) {
@@ -380,23 +400,56 @@ async function reroute(fit = false) {
     routeWorker.postMessage({ version, input });
   });
 }
-async function automatic() {
+async function automatic(cycle = true) {
+  if (cycle) cycleLayout();
   capture();
   arrange(false);
   capture();
   await reroute(true);
 }
 async function centerOn(id: string) {
+  const direct = ranking.value.find((r) => r.id === id);
+  if (!direct) {
+    const byId = new Map(
+      fullElements
+        .filter((e) => !e.data.source)
+        .map((e) => [e.data.id, e.data]),
+    );
+    const belongsTo = (candidate: string) => {
+      let at = byId.get(candidate);
+      while (at?.parent) {
+        if (at.parent === id) return true;
+        at = byId.get(at.parent);
+      }
+      return false;
+    };
+    id = ranking.value.find((r) => belongsTo(r.id))?.id || id;
+  }
   centerOverride.value = id;
-  await automatic();
+  await automatic(false);
 }
 function pinChosen() {
   if (!chosen.value) return;
-  const id = chosen.value.id;
-  pinned.value = pinned.value.includes(id)
-    ? pinned.value.filter((n) => n !== id)
-    : [...pinned.value, id];
+  const selected = cy?.getElementById(chosen.value.id);
+  const ids =
+    selected?.length && selected.isParent()
+      ? selected.descendants(":childless").map((n: any) => n.id())
+      : [chosen.value.id];
+  const release =
+    ids.length > 0 && ids.every((id: string) => pinned.value.includes(id));
+  pinned.value = release
+    ? pinned.value.filter((id) => !ids.includes(id))
+    : [...new Set([...pinned.value, ...ids])];
   capture();
+}
+function chosenPinned() {
+  if (!chosen.value) return false;
+  const selected = cy?.getElementById(chosen.value.id);
+  const ids =
+    selected?.length && selected.isParent()
+      ? selected.descendants(":childless").map((n: any) => n.id())
+      : [chosen.value.id];
+  return ids.length > 0 && ids.every((id: string) => pinned.value.includes(id));
 }
 function selectRank(id: string) {
   const n = cy?.getElementById(id);
@@ -407,13 +460,13 @@ function selectRank(id: string) {
 }
 function viewState() {
   return {
-    schema_version: 2,
+    schema_version: 3,
     filters: config.value,
     positions: positions.value,
     collapsed: collapsed.value,
     pinned: pinned.value,
     center: centerOverride.value,
-    layout: "radial-v2",
+    layout: activeLayout.value.id,
   };
 }
 
@@ -581,6 +634,28 @@ async function draw(elementsIn: any[], saved: any = {}) {
         },
       },
       {
+        selector: 'node[entity_type="server_group"]',
+        style: {
+          "background-color": "#e8eff8",
+          "border-color": "#7899b7",
+          color: "#294c69",
+          shape: "rectangle",
+          "border-width": 2,
+        },
+      },
+      {
+        selector: 'node[entity_type="location_gateway"]',
+        style: {
+          "background-color": "#dce9ef",
+          "border-color": "#47778d",
+          shape: "diamond",
+          width: 92,
+          height: 62,
+          "font-size": 9,
+          "text-max-width": "76px",
+        },
+      },
+      {
         selector: 'node[entity_type="databases"]',
         style: {
           "background-image": dbSvg,
@@ -615,6 +690,47 @@ async function draw(elementsIn: any[], saved: any = {}) {
           "background-opacity": 0.6,
           padding: "40px",
           "border-color": "#9ca8bd",
+        },
+      },
+      {
+        selector: 'node[entity_type="server_group"]:parent',
+        style: {
+          "background-color": "#eef4f8",
+          "background-opacity": 0.72,
+          "border-color": "#7899b7",
+          "border-width": 2,
+          "border-style": "solid",
+          color: "#294c69",
+        },
+      },
+      {
+        selector: 'node[entity_type="location_group"]:parent',
+        style: {
+          "background-color": "#eef7f3",
+          "background-opacity": 0.55,
+          "border-color": "#5f9988",
+          "border-width": 2,
+          "border-style": "solid",
+          padding: "48px",
+          "font-size": 14,
+        },
+      },
+      {
+        selector: 'node[entity_type="location_group"][scope="external"]:parent',
+        style: {
+          "background-color": "#f8f0ff",
+          "border-color": "#9b6fc0",
+          "border-style": "dashed",
+          color: "#694383",
+        },
+      },
+      {
+        selector: 'node[entity_type="location_group"][scope="unknown"]:parent',
+        style: {
+          "background-color": "#fff8e8",
+          "border-color": "#c39332",
+          "border-style": "dashed",
+          color: "#745719",
         },
       },
       {
@@ -658,6 +774,18 @@ async function draw(elementsIn: any[], saved: any = {}) {
         selector:
           'edge[status="disabled"],edge[status="planned"],edge[status="expired"]',
         style: { opacity: 0.45, "line-style": "dashed" },
+      },
+      {
+        selector: "edge[?on_path]",
+        style: {
+          width: 4,
+          "line-color": "#d07819",
+          "target-arrow-color": "#d07819",
+        },
+      },
+      {
+        selector: 'node[path_state="path"],node[path_state="endpoint"]',
+        style: { "border-color": "#d07819", "border-width": 4 },
       },
       {
         selector: ":selected",
@@ -727,6 +855,7 @@ function arrange(restore = false, saved: any = {}) {
     visibleEdges,
     centerOverride.value,
     fixed,
+    activeLayout.value.id,
   );
   ranking.value = result.ranks;
   actualCenter.value = result.center;
@@ -737,14 +866,8 @@ function arrange(restore = false, saved: any = {}) {
           ? saved[n.id()]
           : result.positions[n.id()] || { x: 0, y: 0 },
       );
-      const rank = result.ranks.find((r) => r.id === n.id());
       n.data("label", n.data("base_label") || n.data("label"));
       n.data("base_label", n.data("label"));
-      if (rank)
-        n.data(
-          "label",
-          `${rank.rank}. · ${rank.degree} szomszéd\n${n.data("base_label")}`,
-        );
       n.data("is_center", n.id() === result.center);
     });
   });
@@ -795,11 +918,13 @@ async function applyCollapse(preserve = true) {
       (e) =>
         !e.data.source ||
         e.data.source !== e.data.target ||
-        byId.get(e.data.source)?.entity_type !== "group",
+        !["group", "server_group", "location_group"].includes(
+          byId.get(e.data.source)?.entity_type,
+        ),
     );
   await draw(els, preserve ? positions.value : {});
 }
-async function load(restoreLayout = false) {
+async function load(restoreLayout = false, cycle = true) {
   if (props.proof) {
     await benchmark();
     return;
@@ -807,6 +932,7 @@ async function load(restoreLayout = false) {
   busy.value = true;
   error.value = "";
   try {
+    if (cycle) cycleLayout();
     const g = await api("graphs/query", "POST", config.value);
     meta.value = g.meta;
     fullElements = elements(g);
@@ -843,8 +969,12 @@ async function restore() {
   collapsed.value = v.config.collapsed || [];
   pinned.value = v.config.pinned || Object.keys(v.config.positions || {});
   centerOverride.value = v.config.center || "";
+  const restoredLayout = layoutModes.findIndex(
+    (mode) => mode.id === v.config.layout,
+  );
+  layoutModeIndex.value = restoredLayout >= 0 ? restoredLayout : 0;
   viewName.value = v.name;
-  await load(true);
+  await load(true, false);
 }
 function download(url: string, name: string) {
   const a = document.createElement("a");
@@ -1027,15 +1157,13 @@ function exportJson() {
 function focus() {
   const n = cy
     ?.nodes()
-    .filter(
-      (n) =>
-        String(n.data("label"))
-          .toLowerCase()
-          .includes(find.value.toLowerCase()) && !n.isParent(),
+    .filter((n) =>
+      String(n.data("label")).toLowerCase().includes(find.value.toLowerCase()),
     );
   if (n?.length) {
     cy?.fit(n, 100);
     n.select();
+    chosen.value = n.first().data();
   }
 }
 async function benchmark() {
@@ -1050,8 +1178,12 @@ async function benchmark() {
   await draw(fullElements, f.positions);
   meta.value = {
     counts: {
-      nodes: f.nodes.filter((n) => !["group", "zone"].includes(n.entity_type))
-        .length,
+      nodes: f.nodes.filter(
+        (n) =>
+          !["group", "zone", "location_group", "location_gateway"].includes(
+            n.entity_type,
+          ),
+      ).length,
       edges: f.edges.length,
     },
     warnings: [
@@ -1065,7 +1197,7 @@ async function benchmark() {
 onMounted(async () => {
   document.addEventListener("fullscreenchange", fullscreenChanged);
   document.addEventListener("keydown", fullscreenKey);
-  await load();
+  await load(false, false);
   if (!props.proof) views.value = (await api("diagram-views")).data;
   resize = new ResizeObserver(() => cy?.resize());
   if (canvas.value) resize.observe(canvas.value);
@@ -1106,6 +1238,7 @@ onBeforeUnmount(() => {
           <option value="applications">Alkalmazásintegrációk</option>
           <option value="servers">Szerverkapcsolatok</option>
           <option value="network">Hálózati szabályok</option>
+          <option value="datacenters">Adatközpontok és külső hosztolás</option>
         </select></label
       ><label
         >Környezet<select v-model="config.environment">
@@ -1116,7 +1249,35 @@ onBeforeUnmount(() => {
             {{ e }}
           </option>
         </select></label
-      ><label
+      ><template v-if="config.view === 'datacenters'">
+        <label
+          >Hálózati útvonal innen<select v-model="config.path_from">
+            <option value="">Nincs kiválasztva</option>
+            <option
+              v-for="location in meta.locations || []"
+              :value="location.key"
+            >
+              {{ location.label }}
+            </option>
+          </select></label
+        ><label
+          >Hálózati útvonal ide<select v-model="config.path_to">
+            <option value="">Nincs kiválasztva</option>
+            <option
+              v-for="location in meta.locations || []"
+              :value="location.key"
+            >
+              {{ location.label }}
+            </option>
+          </select></label
+        >
+        <p class="muted">
+          Az első frissítés feltölti a helylistát. Két hely kiválasztása után a
+          következő frissítés kiemeli a dokumentált, akár több lépéses
+          útvonalat.
+        </p>
+      </template>
+      <label
         >Kiinduló szerverek<Lookup
           type="servers"
           v-model="selectedServer"
@@ -1156,7 +1317,7 @@ onBeforeUnmount(() => {
         </select></label
       >
       <div class="divider"></div>
-      <label class="check"
+      <label v-if="config.view === 'infrastructure'" class="check"
         ><input type="checkbox" v-model="config.groups" />Szerverkeretek</label
       ><label class="check"
         ><input
@@ -1230,24 +1391,32 @@ onBeforeUnmount(() => {
       </div>
       <div v-if="error" role="alert" class="notice">{{ error }}</div>
       <div v-for="w in meta.warnings" class="notice">{{ w }}</div>
+      <div v-if="meta.location_path?.length" class="notice location-path">
+        Dokumentált hálózati útvonal:
+        <strong>{{ meta.location_path.join(" → ") }}</strong>
+      </div>
       <div v-if="meta.unprojected?.length" class="notice">
         {{ meta.unprojected.length }} integráció nem vetíthető szerverre:
         {{ meta.unprojected.join(", ") }}
       </div>
       <div class="layout-toolbar">
-        <button @click="automatic" :disabled="routing">
-          <RefreshCw :size="14" />Automatikus elrendezés
+        <button @click="automatic()" :disabled="routing">
+          <RefreshCw :size="14" />Automatikus elrendezés · következő:
+          {{ nextLayout.label }}
         </button>
         <button
           v-if="centerOverride"
           @click="
             centerOverride = '';
-            automatic();
+            automatic(false);
           "
           :disabled="routing"
         >
           Automatikus központ
         </button>
+        <strong class="layout-mode"
+          >Elrendezés: {{ activeLayout.label }}</strong
+        >
         <span>{{ pinned.length }} rögzített pozíció</span>
         <button v-if="pinned.length" @click="pinned = []">
           Rögzítések feloldása
@@ -1331,6 +1500,12 @@ onBeforeUnmount(() => {
         <span><i class="legend-app"></i>Alkalmazás</span
         ><span><i class="legend-server"></i>Szerver</span
         ><span><i class="legend-db"></i>Adatbázis</span
+        ><span v-if="config.view === 'datacenters'"
+          ><i class="legend-datacenter"></i>Belső adatközpont</span
+        ><span v-if="config.view === 'datacenters'"
+          ><i class="legend-external"></i>Felhő / internet / külső hely</span
+        ><span v-if="config.view === 'datacenters'"
+          ><i class="legend-path"></i>Kiválasztott hálózati útvonal</span
         ><span
           >→ Irányított kapcsolat · Vonalszakadás = keresztezés, nem
           csomópont</span
@@ -1496,28 +1671,48 @@ onBeforeUnmount(() => {
       <div class="eyebrow">KIJELÖLT OBJEKTUM</div>
       <h3>{{ chosen.label }}</h3>
       <p>{{ chosen.public_id }}</p>
-      <p>{{ labels[chosen.entity_type] || chosen.type }}</p>
-      <template
-        v-if="!chosen.source && ranking.some((r) => r.id === chosen.id)"
-      >
-        <p>
+      <p>
+        {{ labels[chosen.record_type || chosen.entity_type] || chosen.type }}
+      </p>
+      <p v-if="chosen.environment">Környezet: {{ chosen.environment }}</p>
+      <p v-if="chosen.datacenter">Adatközpont: {{ chosen.datacenter }}</p>
+      <p v-if="chosen.hosting_type">Hosztolás: {{ chosen.hosting_type }}</p>
+      <p v-if="chosen.entity_type === 'location_group'">
+        {{ chosen.member_count }} közvetlenül besorolt elem ·
+        {{
+          chosen.scope === "external" ? "belső hálózaton kívül" : chosen.scope
+        }}
+      </p>
+      <template v-if="!chosen.source">
+        <p v-if="ranking.some((r) => r.id === chosen.id)">
           {{ ranking.find((r) => r.id === chosen.id)?.degree }} egyedi szomszéd
           a jelenlegi nézetben
         </p>
-        <button @click="centerOn(chosen.id)" :disabled="routing">
+        <button
+          v-if="
+            ranking.some((r) => r.id === chosen.id) ||
+            ['server_group', 'location_group'].includes(chosen.entity_type)
+          "
+          @click="centerOn(chosen.id)"
+          :disabled="routing"
+        >
           Középpontba helyezés
         </button>
       </template>
       <button
         v-if="
           !chosen.source &&
-          !['group', 'zone', 'component'].includes(chosen.entity_type)
+          ![
+            'group',
+            'zone',
+            'component',
+            'location_group',
+            'location_gateway',
+          ].includes(chosen.entity_type)
         "
         @click="pinChosen"
       >
-        {{
-          pinned.includes(chosen.id) ? "Pozíció feloldása" : "Pozíció rögzítése"
-        }}
+        {{ chosenPinned() ? "Pozíció feloldása" : "Pozíció rögzítése" }}
       </button>
       <p v-if="chosen.count">{{ chosen.count }} mögöttes kapcsolat</p>
       <p v-if="chosen.source">
@@ -1531,13 +1726,19 @@ onBeforeUnmount(() => {
         </p>
       </details>
       <button
-        v-if="['group', 'collapsed'].includes(chosen.entity_type)"
+        v-if="
+          ['group', 'server_group', 'location_group', 'collapsed'].includes(
+            chosen.entity_type,
+          )
+        "
         @click="collapse(chosen.id)"
       >
         Keret összecsukása / kinyitása</button
       ><button
-        v-if="labels[chosen.entity_type]"
-        @click="openRecord(chosen.entity_type, chosen.entity_id)"
+        v-if="labels[chosen.record_type || chosen.entity_type]"
+        @click="
+          openRecord(chosen.record_type || chosen.entity_type, chosen.entity_id)
+        "
       >
         Adatlap megnyitása →</button
       ><button
