@@ -105,7 +105,90 @@ final class App
         $r = $this->one("SELECT * FROM `$type` WHERE id=?", [$id]);
         if (!$r) {
             throw new ApiError(404, 'A rekord nem található.');
-        }return $raw ? $r : $this->clean($r, $type);
+        }
+        if ($raw) {
+            return $r;
+        }
+        return $this->decorateReferences($type, [$this->clean($r, $type)])[0];
+    }
+    private function listFields(string $type): array
+    {
+        return ['public_id',...array_keys(Schema::fields()[$type]),'data_quality_status'];
+    }
+    private function referenceTarget(string $type, string $field): ?string
+    {
+        $kind = Schema::fields()[$type][$field] ?? '';
+        return str_starts_with($kind, 'ref:') ? substr($kind, 4) : null;
+    }
+    private function columnFilters(string $type, array $p): array
+    {
+        $raw = $p['column_filters'] ?? [];
+        if (is_string($raw)) {
+            if (strlen($raw) > 50000) {
+                throw new ApiError(422, 'Túl sok oszlopszűrő érkezett.');
+            }
+            $raw = json_decode($raw, true);
+        }
+        if (!is_array($raw)) {
+            return [];
+        }
+        $allowed = array_fill_keys($this->listFields($type), true);
+        $filters = [];
+        foreach ($raw as $field => $filter) {
+            if (!is_string($field) || !isset($allowed[$field]) || !is_array($filter)) {
+                continue;
+            }
+            $text = is_scalar($filter['text'] ?? null) ? trim((string)$filter['text']) : '';
+            $values = is_array($filter['values'] ?? null) ? $filter['values'] : [];
+            $values = array_slice(array_values(array_unique(array_map(
+                fn ($value) => is_scalar($value) ? mb_substr((string)$value, 0, 255) : '',
+                $values
+            ))), 0, 100);
+            $values = array_values(array_filter($values, fn ($value) => $value !== ''));
+            if ($text !== '' || $values) {
+                $filters[$field] = ['text' => mb_substr($text, 0, 255),'values' => $values];
+            }
+        }
+        return $filters;
+    }
+    private function decorateReferences(string $type, array $rows): array
+    {
+        if (!$rows) {
+            return $rows;
+        }
+        $requests = [];
+        foreach (Schema::fields()[$type] as $field => $kind) {
+            if (!str_starts_with($kind, 'ref:')) {
+                continue;
+            }
+            $target = substr($kind, 4);
+            foreach ($rows as $row) {
+                if (!empty($row[$field])) {
+                    $requests[$target][$row[$field]] = true;
+                }
+            }
+        }
+        $labels = [];
+        foreach ($requests as $target => $ids) {
+            $idList = array_keys($ids);
+            $public = in_array($target, Schema::TYPES, true);
+            $select = $public ? 'id,name,public_id' : 'id,name';
+            $found = $this->all("SELECT $select FROM `$target` WHERE id IN (".implode(',', array_fill(0, count($idList), '?')).')', $idList);
+            foreach ($found as $record) {
+                $labels[$target][$record['id']] = trim((string)($record['name'] ?? '')) ?: ($record['public_id'] ?? $record['id']);
+            }
+        }
+        foreach ($rows as &$row) {
+            foreach (Schema::fields()[$type] as $field => $kind) {
+                if (!str_starts_with($kind, 'ref:') || empty($row[$field])) {
+                    continue;
+                }
+                $target = substr($kind, 4);
+                $row[$field.'_display'] = $labels[$target][$row[$field]] ?? $row[$field];
+            }
+        }
+        unset($row);
+        return $rows;
     }
     public function query(string $type, array $p): array
     {
@@ -133,7 +216,48 @@ final class App
             $ids = is_array($p['ids']) ? $p['ids'] : explode(',', $p['ids']);
             $where[] = 'id IN ('.implode(',', array_fill(0, count($ids), '?')).')';
             array_push($args, ...$ids);
-        }return [implode(' AND ', $where),$args];
+        }
+        foreach ($this->columnFilters($type, $p) as $field => $filter) {
+            $column = "`$field`";
+            if ($filter['text'] !== '') {
+                $pattern = '%'.$filter['text'].'%';
+                $target = $this->referenceTarget($type, $field);
+                $kind = Schema::fields()[$type][$field] ?? '';
+                if ($target) {
+                    $lookup = '`name` LIKE ?';
+                    $lookupArgs = [$pattern];
+                    if (in_array($target, Schema::TYPES, true)) {
+                        $lookup .= ' OR `public_id` LIKE ?';
+                        $lookupArgs[] = $pattern;
+                    }
+                    $where[] = "($column LIKE ? OR $column IN (SELECT id FROM `$target` WHERE $lookup))";
+                    $args[] = $pattern;
+                    array_push($args, ...$lookupArgs);
+                } elseif (str_starts_with($kind, 'enum:')) {
+                    $where[] = "($column LIKE ? OR $column IN (SELECT code FROM reference_data WHERE category=? AND label LIKE ?))";
+                    array_push($args, $pattern, substr($kind, 5), $pattern);
+                } else {
+                    $where[] = "$column LIKE ?";
+                    $args[] = $pattern;
+                }
+            }
+            if ($filter['values']) {
+                $includeNull = in_array('__EMPTY__', $filter['values'], true);
+                $values = array_values(array_filter($filter['values'], fn ($value) => $value !== '__EMPTY__'));
+                $choices = [];
+                if ($values) {
+                    $choices[] = $column.' IN ('.implode(',', array_fill(0, count($values), '?')).')';
+                    array_push($args, ...$values);
+                }
+                if ($includeNull) {
+                    $choices[] = "$column IS NULL";
+                }
+                if ($choices) {
+                    $where[] = '('.implode(' OR ', $choices).')';
+                }
+            }
+        }
+        return [implode(' AND ', $where),$args];
     }
     public function listing(string $type, array $p): array
     {
@@ -141,10 +265,55 @@ final class App
         $n = (int)($this->one("SELECT COUNT(*) n FROM `$type` WHERE $w", $a)['n']);
         $page = max(1, (int)($p['page'] ?? 1));
         $per = in_array((int)($p['per_page'] ?? 25), [25,50,100]) ? (int)($p['per_page'] ?? 25) : 25;
-        $sort = in_array($p['sort'] ?? '', array_keys(Schema::fields()[$type])) ? $p['sort'] : 'public_id';
+        $sort = in_array($p['sort'] ?? '', $this->listFields($type), true) ? $p['sort'] : 'public_id';
         $dir = ($p['direction'] ?? 'asc') === 'desc' ? 'DESC' : 'ASC';
         $offset = ($page - 1) * $per;
-        return ['data' => array_map(fn ($r) => $this->clean($r, $type), $this->all("SELECT * FROM `$type` WHERE $w ORDER BY `$sort` $dir,id LIMIT $per OFFSET $offset", $a)),'meta' => ['total' => $n,'page' => $page,'per_page' => $per],'links' => ['next' => $offset + $per < $n ? $page + 1 : null]];
+        $target = $this->referenceTarget($type, $sort);
+        $order = $target ? "COALESCE((SELECT NULLIF(name,'') FROM `$target` WHERE `$target`.id=`$type`.`$sort`),`$sort`)" : "`$sort`";
+        $rows = array_map(fn ($r) => $this->clean($r, $type), $this->all("SELECT * FROM `$type` WHERE $w ORDER BY $order $dir,id LIMIT $per OFFSET $offset", $a));
+        $facets = [];
+        $truncated = [];
+        $facetFields = is_array($p['facet_fields'] ?? null) ? $p['facet_fields'] : explode(',', (string)($p['facet_fields'] ?? ''));
+        $facetFields = array_slice(array_values(array_intersect($this->listFields($type), $facetFields)), 0, 12);
+        foreach ($facetFields as $field) {
+            $kind = Schema::fields()[$type][$field] ?? '';
+            if ($kind === 'long') {
+                $facets[$field] = [];
+                $truncated[$field] = false;
+                continue;
+            }
+            $withoutCurrent = $this->columnFilters($type, $p);
+            unset($withoutCurrent[$field]);
+            $facetParams = [...$p,'column_filters' => $withoutCurrent];
+            [$facetWhere,$facetArgs] = $this->query($type, $facetParams);
+            $values = $this->all("SELECT `$field` value,COUNT(*) count FROM `$type` WHERE $facetWhere GROUP BY `$field` ORDER BY count DESC LIMIT 101", $facetArgs);
+            $truncated[$field] = count($values) > 100;
+            $values = array_slice($values, 0, 100);
+            $target = $this->referenceTarget($type, $field);
+            if ($target) {
+                $fake = array_map(fn ($value) => [$field => $value['value']], $values);
+                $fake = $this->decorateReferences($type, $fake);
+                foreach ($values as $index => &$value) {
+                    $value['label'] = $fake[$index][$field.'_display'] ?? $value['value'];
+                }
+                unset($value);
+            } elseif (str_starts_with($kind, 'enum:')) {
+                $dictionary = array_column($this->all('SELECT label,code FROM reference_data WHERE category=?', [substr($kind, 5)]), 'label', 'code');
+                foreach ($values as &$value) {
+                    $value['label'] = $dictionary[$value['value']] ?? $value['value'];
+                }
+                unset($value);
+            }
+            foreach ($values as &$value) {
+                $value['value'] = $value['value'] === null ? '__EMPTY__' : (string)$value['value'];
+                $value['label'] = trim((string)($value['label'] ?? '')) ?: 'Nincs megadva';
+                $value['count'] = (int)$value['count'];
+            }
+            unset($value);
+            usort($values, fn ($left, $right) => strnatcasecmp($left['label'], $right['label']));
+            $facets[$field] = $values;
+        }
+        return ['data' => $this->decorateReferences($type, $rows),'meta' => ['total' => $n,'page' => $page,'per_page' => $per,'facets' => $facets,'facet_truncated' => $truncated],'links' => ['next' => $offset + $per < $n ? $page + 1 : null]];
     }
     public function validate(string $type, array $data, bool $legacy = false): array
     {

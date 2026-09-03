@@ -5,7 +5,7 @@ Magyar nyelvű, helyben futó CMDB alkalmazások, szerverek, adatbázisok, integ
 - Kapcsolati térkép szűréssel, kapcsolatszám szerinti rangsorral, három körbejárható automatikus elrendezéssel, akadálykerülő vonalakkal és kézzel rögzíthető pozíciókkal.
 - Kattintható szerverkeretek, valamint adatközpont/felhő/internet topológia dokumentált, több lépéses hálózati útvonal kiemelésével.
 - PNG, valamint nagyítható **vektoros SVG és PDF** diagramexport; teljes képernyő és összecsukható navigáció.
-- CRUD, kapcsolatok, keresés, archiválás, adatminőség-jelzések és auditnapló.
+- CRUD, névvel megjelenített kapcsolatok, oszloponkénti rendezés és szűrés, archiválás, adatminőség-jelzések és auditnapló.
 - XLSX import előnézettel, XLSX/CSV-ZIP export háttérfeldolgozással.
 - Szerepkörök és külön import/export/kapcsolattartó-hozzáférési jogosultságok.
 - 13 lépéses, szintetikus mintákat használó Oktató fül.

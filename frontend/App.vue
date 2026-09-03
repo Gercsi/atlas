@@ -39,6 +39,7 @@ import {
   AlertTriangle,
   X,
   SlidersHorizontal,
+  ListFilter,
   Clock,
   ExternalLink,
   KeyRound,
@@ -100,6 +101,15 @@ const list = ref<any[]>([]),
   selected = ref<string[]>([]),
   allFiltered = ref(false),
   columnMenu = ref(false),
+  activeColumnMenu = ref(""),
+  columnMenuPosition = ref({ top: 0, left: 0 }),
+  columnFilters = ref<Record<string, { text: string; values: string[] }>>({}),
+  columnFilterDraft = ref<{ text: string; values: string[] }>({
+    text: "",
+    values: [],
+  }),
+  columnFacets = ref<Record<string, any[]>>({}),
+  columnFacetTruncated = ref<Record<string, boolean>>({}),
   visibleColumns = ref<string[]>([
     "public_id",
     "name",
@@ -281,6 +291,8 @@ function url() {
     sort: sort.value,
     direction: direction.value,
     archived: archived.value ? "1" : "",
+    column_filters: JSON.stringify(columnFilters.value),
+    facet_fields: columns.value.join(","),
   });
   return params.toString();
 }
@@ -293,25 +305,18 @@ async function loadList() {
     if (token !== gen) return;
     list.value = r.data;
     total.value = r.meta.total;
+    columnFacets.value = r.meta.facets || {};
+    columnFacetTruncated.value = r.meta.facet_truncated || {};
   } catch (e: any) {
     error.value = e.message;
   }
 }
-async function navigate(target: string) {
-  if (dirty.value && !confirm("Elhagyod a nem mentett módosításokat?")) return;
-  dirty.value = false;
-  detail.value = null;
-  editing.value = false;
-  page.value = target;
-  q.value = "";
-  env.value = "";
-  p.value = 1;
-  selected.value = [];
-  allFiltered.value = false;
-  error.value = "";
+function setDefaultColumns(target: string) {
   if (target === "integrations")
     visibleColumns.value = [
       "public_id",
+      "source_application_id",
+      "target_application_id",
       "interface_type",
       "protocol",
       "status",
@@ -331,6 +336,22 @@ async function navigate(target: string) {
       "environment",
       "data_quality_status",
     ];
+}
+async function navigate(target: string) {
+  if (dirty.value && !confirm("Elhagyod a nem mentett módosításokat?")) return;
+  dirty.value = false;
+  detail.value = null;
+  editing.value = false;
+  page.value = target;
+  q.value = "";
+  env.value = "";
+  p.value = 1;
+  selected.value = [];
+  allFiltered.value = false;
+  activeColumnMenu.value = "";
+  columnFilters.value = {};
+  error.value = "";
+  setDefaultColumns(target);
   history.pushState(null, "", "#/" + target);
   await loadPage();
 }
@@ -363,11 +384,22 @@ async function fromHash() {
     page.value = "dashboard";
     history.replaceState(null, "", "#/dashboard");
   } else if (target) {
+    const pageChanged = page.value !== target;
     page.value = target;
+    if (pageChanged && types.includes(target)) setDefaultColumns(target);
     const search = new URLSearchParams(params);
     q.value = search.get("q") || "";
     env.value = search.get("environment") || "";
     p.value = Number(search.get("page")) || 1;
+    try {
+      const restoredFilters = JSON.parse(search.get("column_filters") || "{}");
+      columnFilters.value =
+        restoredFilters && typeof restoredFilters === "object"
+          ? restoredFilters
+          : {};
+    } catch {
+      columnFilters.value = {};
+    }
     if (id && types.includes(target)) {
       await open(target, id, false);
       return;
@@ -507,14 +539,80 @@ function options(kind: string) {
     (r: any) => r.category === kind.slice(5) && r.active,
   );
 }
-function sortBy(c: string) {
-  if (sort.value === c)
-    direction.value = direction.value === "asc" ? "desc" : "asc";
-  else {
-    sort.value = c;
-    direction.value = "asc";
+function columnFilterActive(field: string) {
+  const filter = columnFilters.value[field];
+  return !!(filter?.text || filter?.values?.length);
+}
+function columnValue(row: any, field: string) {
+  return display(row[field + "_display"] ?? row[field]);
+}
+async function openColumnMenu(field: string, event: MouseEvent) {
+  event.stopPropagation();
+  if (activeColumnMenu.value === field) {
+    activeColumnMenu.value = "";
+    return;
   }
+  const current = columnFilters.value[field];
+  columnFilterDraft.value = {
+    text: current?.text || "",
+    values: [...(current?.values || [])],
+  };
+  const rect = (event.currentTarget as HTMLElement).getBoundingClientRect();
+  columnMenuPosition.value = {
+    top: Math.max(10, Math.min(window.innerHeight - 520, rect.bottom + 6)),
+    left: Math.max(10, Math.min(window.innerWidth - 330, rect.left)),
+  };
+  activeColumnMenu.value = field;
+  if (!(field in columnFacets.value)) await loadList();
+}
+function setColumnSort(field: string, nextDirection: "asc" | "desc") {
+  sort.value = field;
+  direction.value = nextDirection;
+  p.value = 1;
+  activeColumnMenu.value = "";
   loadList();
+}
+function applyColumnFilter(field: string) {
+  const text = columnFilterDraft.value.text.trim();
+  const values = [...new Set(columnFilterDraft.value.values)];
+  if (text || values.length)
+    columnFilters.value = {
+      ...columnFilters.value,
+      [field]: { text, values },
+    };
+  else {
+    const next = { ...columnFilters.value };
+    delete next[field];
+    columnFilters.value = next;
+  }
+  p.value = 1;
+  selected.value = [];
+  allFiltered.value = false;
+  activeColumnMenu.value = "";
+  history.replaceState(null, "", `#/${page.value}?${url()}`);
+  loadList();
+}
+function clearColumnFilter(field: string) {
+  columnFilterDraft.value = { text: "", values: [] };
+  const next = { ...columnFilters.value };
+  delete next[field];
+  columnFilters.value = next;
+  p.value = 1;
+  activeColumnMenu.value = "";
+  history.replaceState(null, "", `#/${page.value}?${url()}`);
+  loadList();
+}
+function facetLabel(field: string, facet: any) {
+  if (field === "data_quality_status")
+    return facet.value === "review" ? "Ellenőrizendő" : "Rendben";
+  const kind = meta.value.fields[page.value]?.[field];
+  if (kind === "bool")
+    return facet.value === "1"
+      ? "Igen"
+      : facet.value === "0"
+        ? "Nem"
+        : facet.label;
+  return facet.label;
 }
 function toggleAll(checked: boolean) {
   selected.value = checked ? list.value.map((r) => r.id) : [];
@@ -565,7 +663,11 @@ async function exportData() {
       types: exportTypes.value,
       format: exportFormat.value,
       scope: exportScope.value,
-      filters: { q: q.value, environment: env.value },
+      filters: {
+        q: q.value,
+        environment: env.value,
+        column_filters: columnFilters.value,
+      },
       ids: selected.value,
       archived: archived.value,
     });
@@ -715,6 +817,12 @@ function beforeUnload(e: BeforeUnloadEvent) {
     e.returnValue = "";
   }
 }
+function closeColumnMenu(event: Event) {
+  if ((event as KeyboardEvent).type === "keydown") {
+    if ((event as KeyboardEvent).key !== "Escape") return;
+  }
+  activeColumnMenu.value = "";
+}
 watch([q, env, per, archived], () => {
   if (!user.value || !isList.value) return;
   clearTimeout(debounce);
@@ -731,6 +839,8 @@ onMounted(() => {
   window.addEventListener("popstate", fromHash);
   window.addEventListener("beforeunload", beforeUnload);
   window.addEventListener("cmdb:login-redirect", beforeLoginRedirect);
+  window.addEventListener("click", closeColumnMenu);
+  window.addEventListener("keydown", closeColumnMenu);
 });
 onBeforeUnmount(() => {
   clearTimeout(debounce);
@@ -738,6 +848,8 @@ onBeforeUnmount(() => {
   window.removeEventListener("popstate", fromHash);
   window.removeEventListener("beforeunload", beforeUnload);
   window.removeEventListener("cmdb:login-redirect", beforeLoginRedirect);
+  window.removeEventListener("click", closeColumnMenu);
+  window.removeEventListener("keydown", closeColumnMenu);
 });
 </script>
 <template>
@@ -1182,12 +1294,25 @@ onBeforeUnmount(() => {
                         aria-label="Oldal kijelölése"
                       />
                     </th>
-                    <th v-for="c in columns">
-                      <button @click="sortBy(c)">
-                        {{ labels[c] || c }}
+                    <th
+                      v-for="c in columns"
+                      :key="c"
+                      :class="{ 'column-filtered': columnFilterActive(c) }"
+                    >
+                      <button
+                        class="column-heading"
+                        @click.stop="openColumnMenu(c, $event)"
+                        :aria-expanded="activeColumnMenu === c"
+                        :aria-label="`${labels[c] || c} oszlop rendezése és szűrése`"
+                      >
+                        <span>{{ labels[c] || c }}</span>
                         <span v-if="sort === c">{{
                           direction === "asc" ? "↑" : "↓"
                         }}</span>
+                        <ListFilter
+                          :size="12"
+                          :class="{ active: columnFilterActive(c) }"
+                        />
                       </button>
                     </th>
                     <th></th>
@@ -1229,7 +1354,7 @@ onBeforeUnmount(() => {
                       ><strong v-else-if="c === 'name'">{{
                         r[c] || r.public_id
                       }}</strong
-                      ><span v-else>{{ display(r[c]) }}</span>
+                      ><span v-else>{{ columnValue(r, c) }}</span>
                     </td>
                     <td><ChevronRight :size="15" /></td>
                   </tr>
@@ -1242,6 +1367,86 @@ onBeforeUnmount(() => {
                   Hozz létre egyet, importálj adatokat, vagy módosítsd a
                   szűrőket.
                 </p>
+              </div>
+            </div>
+            <div
+              v-if="activeColumnMenu"
+              class="column-filter-menu"
+              :style="{
+                top: columnMenuPosition.top + 'px',
+                left: columnMenuPosition.left + 'px',
+              }"
+              role="dialog"
+              :aria-label="`${labels[activeColumnMenu] || activeColumnMenu} oszlopszűrő`"
+              @click.stop
+            >
+              <div class="column-filter-title">
+                <strong>{{
+                  labels[activeColumnMenu] || activeColumnMenu
+                }}</strong
+                ><button
+                  class="icon-button"
+                  @click="activeColumnMenu = ''"
+                  aria-label="Oszlopszűrő bezárása"
+                >
+                  <X :size="15" />
+                </button>
+              </div>
+              <div class="column-sort-actions">
+                <button @click="setColumnSort(activeColumnMenu, 'asc')">
+                  A → Z
+                </button>
+                <button @click="setColumnSort(activeColumnMenu, 'desc')">
+                  Z → A
+                </button>
+              </div>
+              <label class="column-text-filter"
+                >Szöveges szűrés
+                <input
+                  v-model="columnFilterDraft.text"
+                  placeholder="Tartalmazza ezt a szöveget…"
+                  @keyup.enter="applyColumnFilter(activeColumnMenu)"
+                />
+              </label>
+              <fieldset class="column-value-filter">
+                <legend>Kiválasztott értékek</legend>
+                <label
+                  class="check"
+                  v-for="facet in columnFacets[activeColumnMenu] || []"
+                  :key="facet.value"
+                >
+                  <input
+                    type="checkbox"
+                    :value="facet.value"
+                    v-model="columnFilterDraft.values"
+                  /><span>{{ facetLabel(activeColumnMenu, facet) }}</span
+                  ><small>{{ facet.count }}</small>
+                </label>
+                <p v-if="!(columnFacets[activeColumnMenu] || []).length">
+                  {{
+                    meta.fields[page]?.[activeColumnMenu] === "long"
+                      ? "Ehhez a hosszú szöveges oszlophoz használd a fenti keresőt."
+                      : "Nincs választható érték."
+                  }}
+                </p>
+                <p v-if="columnFacetTruncated[activeColumnMenu]">
+                  Az első 100 leggyakoribb érték látható; további értékhez
+                  használd a szöveges szűrést.
+                </p>
+              </fieldset>
+              <div class="column-filter-actions">
+                <button
+                  class="text-button"
+                  @click="clearColumnFilter(activeColumnMenu)"
+                >
+                  Szűrés törlése
+                </button>
+                <button
+                  class="primary"
+                  @click="applyColumnFilter(activeColumnMenu)"
+                >
+                  Alkalmazás
+                </button>
               </div>
             </div>
             <div class="pagination">

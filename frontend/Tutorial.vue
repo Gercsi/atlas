@@ -78,6 +78,7 @@ const steps = [
     instructions: [
       "Integrációk → Új rekord. Válaszd ki a valódi forrás- és célobjektumot a keresőmezőkben.",
       "Töltsd ki az interfész, a protokoll és az állapot ismert adatait, majd mentsd a rekordot.",
+      "A listában a kapcsolt rekordok neve jelenik meg. Bármely oszlop fejlécére kattintva A–Z/Z–A rendezést, szöveges szűrést vagy többértékes jelölőnégyzetes szűrést választhatsz.",
       "A diagramon a nyílhegy a célra mutat. Ugyanahhoz a szomszédhoz több integráció is tartozhat; a rangsor ettől még egy szomszédot számol.",
     ],
     tip: "A mintakapcsolat irányát az Irány megfordítása gombbal változtathatod. Figyeld meg a nyílhegyet és a forrás → cél feliratot.",

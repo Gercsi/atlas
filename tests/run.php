@@ -86,6 +86,26 @@ $test('A05 datacenter, cloud and multi-hop location route', function () use ($a,
     $assert($g['meta']['location_path'] === ['Adatközpont · DC-A','Adatközpont · DC-B','Adatközpont · DC-C'], 'A kétlépéses adatközponti útvonal hibás.');
     $assert(count(array_filter($g['edges'], fn ($edge) => !empty($edge['on_path']))) === 2, 'A több lépéses útvonal élei nincsenek kiemelve.');
 });
+$test('A05b reference names, column sorting, text/value filters and facets', function () use ($a, $app, $app2, $app3, $int, $assert) {
+    $second = $a->save('integrations', ['source_application_id' => $app2['id'],'target_application_id' => $app3['id'],'interface_type' => 'Events','protocol' => 'HTTPS']);
+    $listing = $a->listing('integrations', ['sort' => 'target_application_id','direction' => 'asc','facet_fields' => 'source_application_id,target_application_id']);
+    $byId = array_column($listing['data'], null, 'id');
+    $assert($byId[$int['id']]['source_application_id_display'] === 'Műhely — Áttekintés', 'A forrásalkalmazás neve hiányzik.');
+    $assert($byId[$int['id']]['target_application_id_display'] === 'Raktár', 'A célalkalmazás neve hiányzik.');
+    $assert($byId[$int['id']]['target_application_id'] === $app2['id'], 'A háttérben meg kell maradnia a stabil azonosítónak.');
+    $labels = array_column($listing['data'], 'target_application_id_display');
+    $sorted = $labels;
+    usort($sorted, 'strnatcasecmp');
+    $assert($labels === $sorted, 'A hivatkozási oszlopot név szerint kell rendezni.');
+    $facetLabels = array_column($listing['meta']['facets']['target_application_id'], 'label');
+    $assert(in_array('Raktár', $facetLabels, true) && in_array('Teszt portál', $facetLabels, true), 'A szűrőértékekhez feloldott nevek kellenek.');
+    $text = $a->listing('integrations', ['column_filters' => ['target_application_id' => ['text' => 'Teszt port','values' => []]]]);
+    $assert($text['meta']['total'] === 1 && $text['data'][0]['id'] === $second['id'], 'A név szerinti szöveges oszlopszűrés hibás.');
+    $checked = $a->listing('integrations', ['column_filters' => ['target_application_id' => ['text' => '','values' => [$app2['id']]]]]);
+    $assert($checked['meta']['total'] === 1 && $checked['data'][0]['id'] === $int['id'], 'A jelölőnégyzetes oszlopszűrés hibás.');
+    $export = (new Exporter($a))->snapshot(['types' => ['integrations'],'scope' => 'filtered','filters' => ['column_filters' => ['target_application_id' => ['text' => '','values' => [$app2['id']]]]]]);
+    $assert(count($export['integrations']['rows']) === 1, 'A szűrt exportnak is követnie kell az oszlopszűrést.');
+});
 $test('A06 optimistic edit 409 and no lost update', function () use ($a, $app, $expect, $assert) {
     $a->save('applications', ['name' => 'Műhely — javított','lock_version' => 1], $app['id']);
     $expect(409, fn () => $a->save('applications', ['name' => 'Elvesző változat','lock_version' => 1], $app['id']));
