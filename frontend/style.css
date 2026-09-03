@@ -1244,11 +1244,13 @@ tr[tabindex]:hover {
 .drawer-overlay {
   position: fixed;
   inset: 0;
-  background: #192f2944;
+  background-color: #192f2944;
   backdrop-filter: blur(2px);
+  -webkit-backdrop-filter: blur(2px);
   z-index: 80;
   display: flex;
   justify-content: flex-end;
+  animation: drawer-backdrop-in 900ms ease both;
 }
 .drawer {
   width: 710px;
@@ -1259,6 +1261,27 @@ tr[tabindex]:hover {
   box-shadow: -10px 0 40px #18302812;
   display: flex;
   flex-direction: column;
+  animation: drawer-slide-in 900ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+@keyframes drawer-backdrop-in {
+  from {
+    background-color: transparent;
+    backdrop-filter: blur(0);
+    -webkit-backdrop-filter: blur(0);
+  }
+}
+@keyframes drawer-slide-in {
+  from {
+    transform: translate3d(100%, 0, 0);
+    opacity: 0;
+    box-shadow: none;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .drawer-overlay,
+  .drawer {
+    animation-duration: 1ms;
+  }
 }
 .drawer-head {
   padding: 27px 28px;
