@@ -54,11 +54,14 @@ A `Deploy-AtlasCMDB.ps1` a futtatásra kész [atlas-cmdb](https://github.com/Ger
 ```powershell
 .\Deploy-AtlasCMDB.ps1 -DryRun
 .\Deploy-AtlasCMDB.ps1
+
+# Belső hálózati teszt a fejlesztői gép DNS-nevével
+.\Deploy-AtlasCMDB.ps1 -AllowRemote -ServerName 'FEJLESZTO-PC'
 ```
 
 Az Apache-ban a PHP-kezelőt és a `mod_env` modult előre be kell állítani. A scriptet rendszergazdai PowerShellből futtasd. Az alapértelmezett `atlas-cmdb.local` névhez adj `127.0.0.1 atlas-cmdb.local` sort a Windows hosts fájlhoz, vagy hozz létre megfelelő helyi DNS-rekordot. Minta vhost: `apache/atlas-cmdb.conf`.
 
-Hasznos kapcsolók: `-ApacheRoot`, `-TargetPath`, `-VHostPath`, `-ServerName`, `-Port`, `-Config`, `-Branch`, `-ApacheServiceName`, `-NoRestart`, `-SkipBackup`. A `-Force` Git-repóban az átnézett helyi módosítások eldobását engedélyezi; nem Git-alapú, nem üres célmappánál a régi mappát biztonsági másolatba helyezi. A privát konfiguráció és a mentések a dokumentumgyökéren kívül maradnak.
+Hasznos kapcsolók: `-ApacheRoot`, `-TargetPath`, `-VHostPath`, `-ServerName`, `-Port`, `-Config`, `-Branch`, `-ApacheServiceName`, `-AllowRemote`, `-NoRestart`, `-SkipBackup`. A `-AllowRemote` a vhost és az API helyi címkorlátozását együtt oldja fel; a megadott `ServerName` továbbra is kötelező host-engedélylista marad. Csak az első admin létrehozása után kapcsold be, és a Windows tűzfalon kizárólag a tesztelői belső hálózatból engedélyezd a portot. Nyilvános hálózaton csak HTTPS mellett használd. A `-Force` Git-repóban az átnézett helyi módosítások eldobását engedélyezi; nem Git-alapú, nem üres célmappánál a régi mappát biztonsági másolatba helyezi. A privát konfiguráció és a mentések a dokumentumgyökéren kívül maradnak.
 
 ## Egyéb helyi környezet
 
