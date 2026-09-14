@@ -47,6 +47,17 @@ Másik port vagy privát konfiguráció:
 
 A `config.json` fájlt **ne hozd létre üresen**: a telepítő írja meg. A privát mappa maradjon a projekten és a teljes webrooton kívül. XAMPP alatt az `atlas` projekt alapértelmezett helye `C:\xampp\atlas-private\config.json`; a korábbi `CMDB` mappában futó példány továbbra is a meglévő `C:\xampp\cmdb-private\config.json` konfigurációját használja.
 
+## Telepíthető kiadás deployja
+
+A `Deploy-AtlasCMDB.ps1` a futtatásra kész [atlas-cmdb](https://github.com/Gercsi/atlas-cmdb) repóból telepít vagy frissít. Meglévő konfigurációnál alapértelmezetten mentést készít, leállítja az Atlas folyamatait, frissíti a `main` ágat, migrálja az adatbázist, újraindít és HTTP-állapotellenőrzést végez.
+
+```powershell
+.\Deploy-AtlasCMDB.ps1 -DryRun
+.\Deploy-AtlasCMDB.ps1
+```
+
+Hasznos kapcsolók: `-TargetPath`, `-Port`, `-Config`, `-Branch`, `-NoRestart`, `-SkipBackup`. A `-Force` csak átnézett helyi módosítások eldobására használható. A privát konfiguráció és a mentések a projektmappán kívül maradnak.
+
 ## Egyéb helyi környezet
 
 Telepítsd ugyanazokat a függőségeket, építsd meg a frontendet, és állítsd be a `CMDB_CONFIG` környezeti változót a webszerver és a worker folyamatában is. A `.env.example` csak dokumentációs minta; nincs automatikus dotenv-betöltés.
