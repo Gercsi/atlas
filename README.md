@@ -49,7 +49,7 @@ A `config.json` fájlt **ne hozd létre üresen**: a telepítő írja meg. A pri
 
 ## Telepíthető kiadás deployja Apache 2.4 alá
 
-A `Deploy-AtlasCMDB.ps1` a futtatásra kész [atlas-cmdb](https://github.com/Gercsi/atlas-cmdb) repóból telepít vagy frissít a `C:\Apache24\htdocs\Atlas-cmdb` mappába. Létrehozza és beköti az Apache vhost fájlt, ellenőrzi az Apache-konfigurációt, meglévő rendszer esetén mentést készít, frissíti a `main` ágat, migrálja az adatbázist, újraindítja az Apache szolgáltatást és az exportworkert, majd HTTP-állapotellenőrzést végez.
+A `Deploy-AtlasCMDB.ps1` a futtatásra kész [atlas-cmdb](https://github.com/Gercsi/atlas-cmdb) repóból telepít vagy frissít a `C:\Apache24\htdocs\atlas` mappába. Létrehozza és beköti az Apache vhost fájlt, ellenőrzi az Apache-konfigurációt, meglévő rendszer esetén mentést készít, frissíti a `main` ágat, migrálja az adatbázist, újraindítja az Apache szolgáltatást és az exportworkert, majd HTTP-állapotellenőrzést végez. A már létező üres célmappát elfogadja. Nem üres, Git nélküli célmappát csak `-Force` használatakor cserél le, és előtte időbélyeges `.predeploy-*` biztonsági másolatként megőrzi.
 
 ```powershell
 .\Deploy-AtlasCMDB.ps1 -DryRun
@@ -58,7 +58,7 @@ A `Deploy-AtlasCMDB.ps1` a futtatásra kész [atlas-cmdb](https://github.com/Ger
 
 Az Apache-ban a PHP-kezelőt és a `mod_env` modult előre be kell állítani. A scriptet rendszergazdai PowerShellből futtasd. Az alapértelmezett `atlas-cmdb.local` névhez adj `127.0.0.1 atlas-cmdb.local` sort a Windows hosts fájlhoz, vagy hozz létre megfelelő helyi DNS-rekordot. Minta vhost: `apache/atlas-cmdb.conf`.
 
-Hasznos kapcsolók: `-ApacheRoot`, `-TargetPath`, `-VHostPath`, `-ServerName`, `-Port`, `-Config`, `-Branch`, `-ApacheServiceName`, `-NoRestart`, `-SkipBackup`. A `-Force` csak átnézett helyi módosítások eldobására használható. A privát konfiguráció és a mentések a dokumentumgyökéren kívül maradnak.
+Hasznos kapcsolók: `-ApacheRoot`, `-TargetPath`, `-VHostPath`, `-ServerName`, `-Port`, `-Config`, `-Branch`, `-ApacheServiceName`, `-NoRestart`, `-SkipBackup`. A `-Force` Git-repóban az átnézett helyi módosítások eldobását engedélyezi; nem Git-alapú, nem üres célmappánál a régi mappát biztonsági másolatba helyezi. A privát konfiguráció és a mentések a dokumentumgyökéren kívül maradnak.
 
 ## Egyéb helyi környezet
 
