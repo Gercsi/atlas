@@ -32,6 +32,7 @@ import {
   type RoutingInput,
 } from "./graph/model";
 import { routeSvg, svgDocument } from "./graph/render";
+import { routeGraph } from "./graph/router";
 import { fixture } from "./graph/fixtures";
 import {
   Maximize,
@@ -366,10 +367,60 @@ async function reroute(fit = false) {
   const input = routeInput();
   await new Promise<void>((resolve) => {
     finishRoute = resolve;
-    routeWorker = new Worker(
-      new URL("./graph/router.worker.ts", import.meta.url),
-      { type: "module" },
-    );
+    let settled = false;
+    const complete = (result?: RoutingResult, message = "") => {
+      if (settled) return;
+      settled = true;
+      if (version === routeVersion) {
+        if (result) {
+          routeResult.value = result;
+          void makeRouteTexture();
+        } else {
+          error.value = message || "Az útvonalvezetés nem indult el.";
+        }
+        routing.value = false;
+        routeWorker?.terminate();
+        routeWorker = undefined;
+        finishRoute = undefined;
+        syncRoutes();
+        updateMini();
+        // A diagram akkor is maradjon látható, ha a kapcsolati worker
+        // szerveroldali MIME- vagy biztonsági szabály miatt nem indul el.
+        if (fit) fitGraph();
+      }
+      resolve();
+    };
+    const compatibleRoute = () => {
+      routeWorker?.terminate();
+      routeWorker = undefined;
+      routeProgress.value = "Kompatibilis számítás…";
+      // Yield once so Vue can paint the status before the synchronous fallback.
+      setTimeout(() => {
+        if (version !== routeVersion) return complete();
+        try {
+          complete(
+            routeGraph(input, (done, total) => {
+              routeProgress.value = `${done} / ${total}`;
+            }),
+          );
+        } catch (cause) {
+          complete(
+            undefined,
+            "Az útvonalvezetés nem indult el. " +
+              (cause instanceof Error ? cause.message : String(cause)),
+          );
+        }
+      }, 0);
+    };
+    try {
+      routeWorker = new Worker(
+        new URL("./graph/router.worker.ts", import.meta.url),
+        { type: "module" },
+      );
+    } catch {
+      compatibleRoute();
+      return;
+    }
     routeWorker.onmessage = (event) => {
       if (event.data.version !== routeVersion) return;
       if (event.data.progress) {
@@ -377,25 +428,12 @@ async function reroute(fit = false) {
         return;
       }
       if (event.data.error)
-        error.value = "Útvonalvezetési hiba: " + event.data.error;
-      else routeResult.value = event.data.result;
-      makeRouteTexture();
-      routing.value = false;
-      routeWorker?.terminate();
-      routeWorker = undefined;
-      finishRoute = undefined;
-      syncRoutes();
-      updateMini();
-      if (fit) fitGraph();
-      resolve();
+        complete(undefined, "Útvonalvezetési hiba: " + event.data.error);
+      else complete(event.data.result);
     };
-    routeWorker.onerror = () => {
-      routing.value = false;
-      error.value = "Az útvonalvezetés nem indult el. Frissítsd a nézetet.";
-      routeWorker?.terminate();
-      routeWorker = undefined;
-      finishRoute = undefined;
-      resolve();
+    routeWorker.onerror = (event) => {
+      event.preventDefault();
+      compatibleRoute();
     };
     routeWorker.postMessage({ version, input });
   });
