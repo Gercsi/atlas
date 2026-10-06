@@ -795,6 +795,27 @@ main {
 .registry-row > svg {
   color: #afbeac;
 }
+.admin-user-row {
+  width: 100%;
+  justify-content: flex-start;
+  border: 0;
+  border-top: 1px solid #f0f3ef;
+  border-radius: 0;
+  background: transparent;
+  text-align: left;
+  font-weight: 400;
+}
+.admin-user-row.selected {
+  background: #eaf3ed;
+  box-shadow: inset 3px 0 #176958;
+}
+.account-card {
+  max-width: 620px;
+}
+.field-error {
+  color: #ad4d42;
+  font-weight: 500;
+}
 .registry-icon {
   display: grid;
   place-items: center;

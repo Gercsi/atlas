@@ -58,6 +58,10 @@ const sections = [
     ],
   },
   {
+    label: "FIÓK",
+    items: [{ id: "account", label: "Jelszó módosítása", icon: KeyRound }],
+  },
+  {
     label: "ADMINISZTRÁCIÓ",
     items: [
       { id: "references", label: "Szótárak", icon: Settings },

@@ -202,7 +202,8 @@ const steps = [
       "Adminisztráció → Felhasználók. Add meg az új felhasználó nevét és legalább 12 karakteres, egyedi jelszavát.",
       "Válassz szerepet: viewer a megtekintéshez, editor a nyilvántartások szerkesztéséhez, admin a rendszer adminisztrálásához.",
       "Szükség szerint jelöld az import_data, export_data, export_diagram és view_contact_details engedélyeket. Csak a feladathoz szükséges jogokat add.",
-      "Mentsd a felhasználót. A mintán alul kipróbálhatod a szerepválasztást; ez nem hoz létre fiókot és nem módosít jogosultságot.",
+      "Meglévő felhasználó módosításához kattints a nevére. Itt a szerepe, külön engedélyei és aktív állapota is módosítható.",
+      "Saját helyi jelszavadat a Fiók → Jelszó módosítása oldalon cserélheted le a jelenlegi jelszó megadásával.",
     ],
     tip:
       "A mostani szereped: " +

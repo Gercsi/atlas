@@ -138,12 +138,19 @@ const importPreview = ref<any>(null),
   exportScope = ref("all"),
   job = ref<any>(null);
 const adminRows = ref<any[]>([]),
+  adminEditingId = ref(""),
   adminForm = ref<any>({
     role: "viewer",
     scope: "internal",
     active: true,
     capabilities: [],
   });
+const accountPassword = ref({
+    current_password: "",
+    new_password: "",
+    new_password_confirmation: "",
+  }),
+  accountFields = ref<Record<string, string>>({});
 const ssoForm = ref<any>({
     enabled: false,
     provider_type: "entra",
@@ -183,6 +190,7 @@ const title = computed(
         transfer: "Import és export",
         quality: "Adatminőség",
         users: "Felhasználók",
+        account: "Jelszó módosítása",
         references: "Szótárak",
         zones: "Hálózati zónák",
         sso: "SSO bejelentkezés",
@@ -351,6 +359,15 @@ async function navigate(target: string) {
   activeColumnMenu.value = "";
   columnFilters.value = {};
   error.value = "";
+  if (target !== "users") resetAdminForm();
+  if (target !== "account") {
+    accountFields.value = {};
+    accountPassword.value = {
+      current_password: "",
+      new_password: "",
+      new_password_confirmation: "",
+    };
+  }
   setDefaultColumns(target);
   history.pushState(null, "", "#/" + target);
   await loadPage();
@@ -689,13 +706,68 @@ async function pollJob() {
 }
 async function adminSave() {
   try {
-    await api("admin/" + page.value, "POST", adminForm.value);
-    adminForm.value = { role: "viewer", scope: "internal", active: true };
+    const method =
+      page.value === "users" && adminEditingId.value ? "PATCH" : "POST";
+    const path =
+      "admin/" +
+      page.value +
+      (page.value === "users" && adminEditingId.value
+        ? "/" + adminEditingId.value
+        : "");
+    await api(path, method, adminForm.value);
+    resetAdminForm();
     await loadPage();
     meta.value = await api("metadata");
-    notify("Mentve.");
+    notify(method === "PATCH" ? "A jogosultságokat módosítottam." : "Mentve.");
   } catch (e: any) {
     error.value = e.message;
+  }
+}
+function resetAdminForm() {
+  adminEditingId.value = "";
+  adminForm.value = {
+    role: "viewer",
+    scope: "internal",
+    active: true,
+    capabilities: [],
+  };
+}
+function editAdminUser(row: any) {
+  adminEditingId.value = row.id;
+  adminForm.value = {
+    username: row.username,
+    role: row.role,
+    active: !!row.active,
+    capabilities: Array.isArray(row.capabilities) ? [...row.capabilities] : [],
+  };
+  error.value = "";
+}
+async function changePassword() {
+  error.value = "";
+  accountFields.value = {};
+  if (
+    accountPassword.value.new_password !==
+    accountPassword.value.new_password_confirmation
+  ) {
+    accountFields.value.new_password_confirmation =
+      "A két új jelszó nem egyezik.";
+    return;
+  }
+  busy.value = true;
+  try {
+    const result = await api("account/password", "PUT", accountPassword.value);
+    setCsrf(result.csrf);
+    accountPassword.value = {
+      current_password: "",
+      new_password: "",
+      new_password_confirmation: "",
+    };
+    notify("A jelszavadat módosítottam.");
+  } catch (e: any) {
+    error.value = e.message;
+    accountFields.value = e.fields || {};
+  } finally {
+    busy.value = false;
   }
 }
 async function saveSso() {
@@ -1703,24 +1775,106 @@ onBeforeUnmount(() => {
             Ehhez a felülethez külön import- vagy exportjogosultság szükséges.
           </p></template
         >
+        <template v-if="page === 'account'">
+          <form
+            class="card padded account-card"
+            @submit.prevent="changePassword"
+          >
+            <div class="section-heading">
+              <div>
+                <h2>Saját jelszó módosítása</h2>
+                <p>
+                  A módosításhoz add meg a jelenlegi jelszavadat. Az új jelszó
+                  legalább 12, legfeljebb 72 karakteres legyen.
+                </p>
+              </div>
+              <KeyRound :size="24" />
+            </div>
+            <div v-if="user.sso_identity" class="notice">
+              Ehhez a fiókhoz SSO-azonosító tartozik. Az Entra ID / AD FS
+              jelszót az identitásszolgáltatónál kell módosítani; az alábbi
+              űrlap kizárólag a külön beállított helyi CMDB-jelszót cseréli.
+            </div>
+            <label
+              >Jelenlegi jelszó<input
+                v-model="accountPassword.current_password"
+                type="password"
+                required
+                autocomplete="current-password"
+              /><small
+                v-if="accountFields.current_password"
+                class="field-error"
+                >{{ accountFields.current_password }}</small
+              ></label
+            ><label
+              >Új jelszó<input
+                v-model="accountPassword.new_password"
+                type="password"
+                required
+                minlength="12"
+                maxlength="72"
+                autocomplete="new-password"
+              /><small v-if="accountFields.new_password" class="field-error">{{
+                accountFields.new_password
+              }}</small></label
+            ><label
+              >Új jelszó megerősítése<input
+                v-model="accountPassword.new_password_confirmation"
+                type="password"
+                required
+                minlength="12"
+                maxlength="72"
+                autocomplete="new-password"
+              /><small
+                v-if="accountFields.new_password_confirmation"
+                class="field-error"
+                >{{ accountFields.new_password_confirmation }}</small
+              ></label
+            >
+            <button class="primary" :disabled="busy">
+              <KeyRound :size="16" />{{
+                busy ? "Mentés…" : "Jelszó módosítása"
+              }}
+            </button>
+          </form>
+        </template>
         <template v-if="['users', 'references', 'zones'].includes(page)"
           ><div class="transfer-grid">
             <section class="card padded">
               <h2>Rögzített elemek</h2>
-              <div class="registry-row" v-for="r in adminRows">
+              <button
+                v-if="page === 'users'"
+                v-for="r in adminRows"
+                type="button"
+                class="registry-row admin-user-row"
+                :class="{ selected: adminEditingId === r.id }"
+                @click="editAdminUser(r)"
+              >
                 <strong>{{ r.username || r.name || r.label }}</strong
-                ><span>{{ r.role || r.scope || r.category }}</span
-                ><code>{{ r.sso_identity ? "SSO" : r.code || "" }}</code>
+                ><span>{{ r.role }} · {{ r.active ? "aktív" : "inaktív" }}</span
+                ><code>{{ r.sso_identity ? "SSO" : "Helyi" }}</code>
+              </button>
+              <div v-else class="registry-row" v-for="r in adminRows">
+                <strong>{{ r.name || r.label }}</strong
+                ><span>{{ r.scope || r.category }}</span
+                ><code>{{ r.code || "" }}</code>
               </div>
             </section>
             <form class="card padded" @submit.prevent="adminSave">
-              <h2>Új elem</h2>
+              <h2>
+                {{
+                  page === "users" && adminEditingId
+                    ? "Felhasználó jogosultságai"
+                    : "Új elem"
+                }}
+              </h2>
               <template v-if="page === 'users'"
                 ><label
                   >Felhasználónév<input
                     v-model="adminForm.username"
+                    :disabled="!!adminEditingId"
                     required /></label
-                ><label
+                ><label v-if="!adminEditingId"
                   >Jelszó<input
                     v-model="adminForm.password"
                     type="password"
@@ -1728,7 +1882,10 @@ onBeforeUnmount(() => {
                     required
                     autocomplete="new-password" /></label
                 ><label
-                  >Szerep<select v-model="adminForm.role">
+                  >Szerep<select
+                    v-model="adminForm.role"
+                    :disabled="adminEditingId === user.id"
+                  >
                     <option>viewer</option>
                     <option>editor</option>
                     <option>admin</option>
@@ -1746,7 +1903,17 @@ onBeforeUnmount(() => {
                     v-model="adminForm.capabilities"
                     :value="c"
                   />{{ c }}</label
-                ></template
+                ><label v-if="adminEditingId" class="check"
+                  ><input
+                    type="checkbox"
+                    v-model="adminForm.active"
+                    :disabled="adminEditingId === user.id"
+                  />Aktív felhasználó</label
+                >
+                <p v-if="adminEditingId === user.id" class="muted">
+                  A saját admin szereped és aktív állapotod önvédelemből nem
+                  kapcsolható ki ezen a felületen.
+                </p></template
               ><template v-if="page === 'zones'"
                 ><label
                   >Zóna neve<input v-model="adminForm.name" required /></label
@@ -1791,7 +1958,19 @@ onBeforeUnmount(() => {
                     type="checkbox"
                   />Aktív</label
                 ></template
-              ><button class="primary">Mentés</button>
+              >
+              <div class="inline">
+                <button class="primary">
+                  {{ adminEditingId ? "Módosítások mentése" : "Mentés" }}
+                </button>
+                <button
+                  v-if="page === 'users' && adminEditingId"
+                  type="button"
+                  @click="resetAdminForm"
+                >
+                  Mégse
+                </button>
+              </div>
             </form>
           </div></template
         >
